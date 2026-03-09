@@ -1,0 +1,3 @@
+# Kök dizin — sadece public_html/ erişilebilir olmalı
+Order deny,allow
+Deny from all

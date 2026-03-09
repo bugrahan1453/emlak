@@ -1,0 +1,69 @@
+{
+    "name": "EmlakRadar Pro",
+    "short_name": "EmlakRadar",
+    "description": "Akıllı Emlak Yönetim Paneli — CRM, AI Değerleme, Eşleştirme",
+    "start_url": "/dashboard.php",
+    "scope": "/",
+    "display": "standalone",
+    "orientation": "portrait-primary",
+    "background_color": "#060a1a",
+    "theme_color": "#00d4ff",
+    "lang": "tr",
+    "icons": [
+        {
+            "src": "/assets/img/icon-72.png",
+            "sizes": "72x72",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "/assets/img/icon-96.png",
+            "sizes": "96x96",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "/assets/img/icon-128.png",
+            "sizes": "128x128",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "/assets/img/icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "/assets/img/icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any maskable"
+        }
+    ],
+    "shortcuts": [
+        {
+            "name": "Dashboard",
+            "short_name": "Ana Sayfa",
+            "description": "Kontrol panelini aç",
+            "url": "/dashboard.php",
+            "icons": [{"src": "/assets/img/icon-96.png", "sizes": "96x96"}]
+        },
+        {
+            "name": "İlanlar",
+            "short_name": "İlanlar",
+            "description": "Emlak ilanlarını görüntüle",
+            "url": "/ilanlar.php",
+            "icons": [{"src": "/assets/img/icon-96.png", "sizes": "96x96"}]
+        },
+        {
+            "name": "Görevler",
+            "short_name": "Görevler",
+            "description": "Günlük görevleri görüntüle",
+            "url": "/gorevler.php",
+            "icons": [{"src": "/assets/img/icon-96.png", "sizes": "96x96"}]
+        }
+    ],
+    "categories": ["business", "productivity"],
+    "screenshots": []
+}

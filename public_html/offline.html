@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EmlakRadar Pro — Çevrimdışı</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #060a1a;
+    color: #e2e8f0;
+    font-family: 'Outfit', 'Segoe UI', sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    text-align: center;
+    padding: 2rem;
+  }
+  .icon { font-size: 5rem; margin-bottom: 1.5rem; }
+  h1 { font-size: 1.75rem; font-weight: 700; margin-bottom: 0.75rem; }
+  p  { color: #64748b; font-size: 1rem; line-height: 1.6; margin-bottom: 2rem; }
+  button {
+    background: rgba(0,212,255,0.15);
+    color: #00d4ff;
+    border: 1px solid rgba(0,212,255,0.3);
+    padding: 0.75rem 2rem;
+    border-radius: 0.75rem;
+    font-size: 1rem;
+    cursor: pointer;
+    font-family: inherit;
+    font-weight: 600;
+  }
+  button:hover { background: rgba(0,212,255,0.25); }
+</style>
+</head>
+<body>
+<div>
+  <div class="icon">📡</div>
+  <h1>İnternet Bağlantısı Yok</h1>
+  <p>EmlakRadar Pro çevrimdışı modda çalışıyor.<br>İnternet bağlantınızı kontrol edip tekrar deneyin.</p>
+  <button onclick="window.location.reload()">🔄 Tekrar Dene</button>
+</div>
+</body>
+</html>
