@@ -37,9 +37,11 @@
 
 <!-- Uygulama JS -->
 <script src="<?= APP_URL ?>/assets/js/app.js"></script>
-<?php if (!empty($extraJs)): ?>
-<script src="<?= APP_URL ?>/assets/js/<?= e($extraJs) ?>"></script>
-<?php endif; ?>
+<?php if (!empty($extraJs)):
+    $jsFiles = is_array($extraJs) ? $extraJs : [$extraJs];
+    foreach ($jsFiles as $jsFile): ?>
+<script src="<?= APP_URL ?>/assets/js/<?= e($jsFile) ?>"></script>
+<?php endforeach; endif; ?>
 <!-- PWA Service Worker -->
 <script src="<?= APP_URL ?>/assets/js/pwa.js"></script>
 

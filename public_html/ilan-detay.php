@@ -18,6 +18,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && postVal('action') === 'sil') {
     }
 }
 
+// AI değerleme verilerini hazırla
+$aiDeg = is_string($ilan['ai_degerleme']) ? json_decode($ilan['ai_degerleme'], true) : ($ilan['ai_degerleme'] ?? []);
+$fotoAnaliz    = $aiDeg['fotograf_analiz']   ?? null;
+$psikoloji     = $aiDeg['satici_psikoloji']  ?? null;
+$emsalDeger    = $aiDeg['emsal_deger']       ?? null;
+
 $pageTitle = $ilan['baslik'];
 $extraJs   = 'ilan-detay.js';
 require_once APP_DIR . '/views/layout/header.php';
@@ -28,7 +34,12 @@ require_once APP_DIR . '/views/layout/header.php';
 <?php require_once APP_DIR . '/views/layout/topbar.php'; ?>
 <?php require_once APP_DIR . '/views/components/bildirim-popup.php'; ?>
 
-<main class="flex-1 p-4 lg:p-6 pb-20 lg:pb-6" x-data="{ aktifFoto: 0, modalAcik: false, silOnay: false, aiYukleniyor: false, aiSonuc: null }">
+<main class="flex-1 p-4 lg:p-6 pb-20 lg:pb-6"
+      x-data="{
+          aktifFoto: 0, modalAcik: false, silOnay: false,
+          aiYukleniyor: {}, aiSonuc: {},
+          sesliNotAcik: false
+      }">
 
     <!-- Breadcrumb -->
     <div class="flex items-center gap-2 text-xs mb-4" style="color: #7a8599;">
@@ -39,14 +50,13 @@ require_once APP_DIR . '/views/layout/header.php';
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-        <!-- Sol: Fotoğraflar + Harita -->
+        <!-- Sol: Fotoğraflar + Harita + Açıklama -->
         <div class="lg:col-span-2 space-y-4">
 
             <!-- Fotoğraf Galerisi -->
-            <?php $fotograflar = is_array($ilan['fotograflar']) ? $ilan['fotograflar'] : []; ?>
+            <?php $fotograflar = is_string($ilan['fotograflar']) ? json_decode($ilan['fotograflar'], true) : ($ilan['fotograflar'] ?? []); ?>
             <?php if (!empty($fotograflar)): ?>
             <div class="rounded-2xl overflow-hidden" style="background: rgba(15,23,62,0.6); border: 1px solid rgba(255,255,255,0.06);">
-                <!-- Ana fotoğraf -->
                 <div class="relative h-72 overflow-hidden cursor-pointer" @click="modalAcik = true">
                     <?php foreach ($fotograflar as $fi => $foto): ?>
                     <img src="<?= APP_URL ?>/uploads/fotograflar/<?= e(basename($foto)) ?>"
@@ -67,7 +77,6 @@ require_once APP_DIR . '/views/layout/header.php';
                                 style="background: rgba(0,0,0,0.5);">›</button>
                     </div>
                 </div>
-                <!-- Thumbnail şeridi -->
                 <div class="flex gap-2 p-3 overflow-x-auto">
                     <?php foreach ($fotograflar as $fi => $foto): ?>
                     <img src="<?= APP_URL ?>/uploads/fotograflar/<?= e(basename($foto)) ?>"
@@ -108,7 +117,7 @@ require_once APP_DIR . '/views/layout/header.php';
             <?php endif; ?>
 
             <!-- Fiyat Geçmişi -->
-            <?php $fiyatGecmisi = is_array($ilan['fiyat_gecmisi']) ? $ilan['fiyat_gecmisi'] : []; ?>
+            <?php $fiyatGecmisi = is_string($ilan['fiyat_gecmisi']) ? json_decode($ilan['fiyat_gecmisi'], true) : ($ilan['fiyat_gecmisi'] ?? []); ?>
             <?php if (!empty($fiyatGecmisi)): ?>
             <div class="rounded-2xl p-5" style="background: rgba(15,23,62,0.6); border: 1px solid rgba(255,255,255,0.06);">
                 <h3 class="text-sm font-semibold mb-3" style="color: #e8ecf4;">📉 Fiyat Geçmişi</h3>
@@ -130,10 +139,76 @@ require_once APP_DIR . '/views/layout/header.php';
                 </script>
             </div>
             <?php endif; ?>
+
+            <!-- ═══ AI FOToğRAF ANALİZ PANELİ ═══ -->
+            <div class="rounded-2xl p-5" style="background: rgba(15,23,62,0.6); border: 1px solid rgba(139,92,246,0.15);">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-sm font-semibold" style="color: #e8ecf4;">📷 AI Fotoğraf Analizi</h3>
+                    <button @click="aiCagir('fotograf_analiz', <?= $id ?>)"
+                            :disabled="aiYukleniyor.fotograf"
+                            class="text-xs px-3 py-1.5 rounded-lg transition-all"
+                            style="background: rgba(139,92,246,0.15); color: #8b5cf6; border: 1px solid rgba(139,92,246,0.3);">
+                        <span x-show="!aiYukleniyor.fotograf">🔍 Analiz Et</span>
+                        <span x-show="aiYukleniyor.fotograf"><span class="loader inline-block mr-1" style="width:12px;height:12px;border-width:2px;"></span>Analiz...</span>
+                    </button>
+                </div>
+
+                <?php if ($fotoAnaliz): ?>
+                <div class="space-y-3">
+                    <!-- Progress bar'lar -->
+                    <div>
+                        <div class="flex justify-between text-xs mb-1">
+                            <span style="color:#7a8599;">Tadilat Durumu</span>
+                            <span class="font-mono" style="color:#00d4ff;"><?= (int)$fotoAnaliz['tadilat_durumu'] ?>/10</span>
+                        </div>
+                        <div class="progress-bar"><div class="progress-fill" style="width:<?= ((int)$fotoAnaliz['tadilat_durumu'])*10 ?>%;background:#00d4ff;"></div></div>
+                    </div>
+                    <div>
+                        <div class="flex justify-between text-xs mb-1">
+                            <span style="color:#7a8599;">Genel Kalite</span>
+                            <span class="font-mono" style="color:#00ff88;"><?= (int)$fotoAnaliz['genel_kalite'] ?>/10</span>
+                        </div>
+                        <div class="progress-bar"><div class="progress-fill" style="width:<?= ((int)$fotoAnaliz['genel_kalite'])*10 ?>%;background:#00ff88;"></div></div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3 text-xs">
+                        <div class="p-2 rounded-lg" style="background:rgba(255,255,255,0.03);">
+                            <span style="color:#7a8599;">Mutfak Yaşı</span>
+                            <div class="font-mono mt-0.5" style="color:#e8ecf4;">~<?= (int)$fotoAnaliz['mutfak_yasi_tahmini'] ?> yıl</div>
+                        </div>
+                        <div class="p-2 rounded-lg" style="background:rgba(255,255,255,0.03);">
+                            <span style="color:#7a8599;">Banyo Yaşı</span>
+                            <div class="font-mono mt-0.5" style="color:#e8ecf4;">~<?= (int)$fotoAnaliz['banyo_yasi_tahmini'] ?> yıl</div>
+                        </div>
+                    </div>
+                    <?php if (!empty($fotoAnaliz['arti_yonler'])): ?>
+                    <div class="text-xs">
+                        <span style="color:#00ff88;">Artılar:</span>
+                        <span style="color:#7a8599;"><?= e(implode(', ', $fotoAnaliz['arti_yonler'])) ?></span>
+                    </div>
+                    <?php endif; ?>
+                    <?php if (!empty($fotoAnaliz['eksi_yonler'])): ?>
+                    <div class="text-xs">
+                        <span style="color:#ff3366;">Eksiler:</span>
+                        <span style="color:#7a8599;"><?= e(implode(', ', $fotoAnaliz['eksi_yonler'])) ?></span>
+                    </div>
+                    <?php endif; ?>
+                    <?php if (($fotoAnaliz['tahmini_tadilat_maliyeti_tl'] ?? 0) > 0): ?>
+                    <div class="text-xs pt-2 border-t" style="border-color:rgba(255,255,255,0.06);">
+                        <span style="color:#7a8599;">Tahmini Tadilat: </span>
+                        <span class="font-mono font-semibold" style="color:#ffaa00;"><?= number_format($fotoAnaliz['tahmini_tadilat_maliyeti_tl'], 0, ',', '.') ?> ₺</span>
+                    </div>
+                    <?php endif; ?>
+                </div>
+                <?php else: ?>
+                <p class="text-xs" style="color:#7a8599;">Fotoğraf analizi için "Analiz Et" butonuna tıklayın.</p>
+                <?php endif; ?>
+                <div x-show="aiSonuc.fotograf" x-html="aiSonuc.fotograf" class="mt-3"></div>
+            </div>
         </div>
 
-        <!-- Sağ: Bilgiler + İşlemler -->
+        <!-- Sağ: Bilgiler + AI Paneller + İşlemler -->
         <div class="space-y-4">
+
             <!-- Temel Bilgiler -->
             <div class="rounded-2xl p-5" style="background: rgba(15,23,62,0.6); border: 1px solid rgba(255,255,255,0.06);">
                 <div class="flex items-start justify-between mb-3">
@@ -180,43 +255,164 @@ require_once APP_DIR . '/views/layout/header.php';
                 <?php endif; ?>
             </div>
 
-            <!-- AI Değerleme -->
-            <?php $aiDeg = is_array($ilan['ai_degerleme']) ? $ilan['ai_degerleme'] : []; ?>
-            <div class="rounded-2xl p-5" style="background: rgba(15,23,62,0.6); border: 1px solid rgba(255,255,255,0.06);">
+            <!-- ═══ AI DEĞERLEME KARTI ═══ -->
+            <div class="rounded-2xl p-5" style="background: rgba(15,23,62,0.6); border: 1px solid rgba(0,212,255,0.15);">
                 <div class="flex items-center justify-between mb-3">
                     <h3 class="text-sm font-semibold" style="color: #e8ecf4;">🤖 AI Değerleme</h3>
-                    <button @click="aiDegerle(<?= $id ?>)" :disabled="aiYukleniyor"
+                    <button @click="aiCagir('ilan_degerle', <?= $id ?>)"
+                            :disabled="aiYukleniyor.degerle"
                             class="text-xs px-3 py-1 rounded-lg transition-colors"
-                            style="background: rgba(139,92,246,0.15); color: #8b5cf6; border: 1px solid rgba(139,92,246,0.3);">
-                        <span x-show="!aiYukleniyor">Değerle</span>
-                        <span x-show="aiYukleniyor">⏳ Hesaplanıyor...</span>
+                            style="background: rgba(0,212,255,0.15); color: #00d4ff; border: 1px solid rgba(0,212,255,0.3);">
+                        <span x-show="!aiYukleniyor.degerle">Değerle</span>
+                        <span x-show="aiYukleniyor.degerle">⏳ Hesaplanıyor...</span>
                     </button>
                 </div>
-                <div x-show="aiSonuc || <?= empty($aiDeg) ? 'false' : 'true' ?>">
-                    <?php if (!empty($aiDeg)): ?>
-                    <div class="space-y-2 text-sm">
-                        <div class="flex justify-between">
-                            <span style="color: #7a8599;">Pazar Değeri</span>
-                            <span class="font-mono font-semibold" style="color: #00ff88;"><?= formatFiyat((float)($aiDeg['pazar_degeri'] ?? 0)) ?></span>
+                <?php if (!empty($aiDeg) && isset($aiDeg['pazar_degeri'])): ?>
+                <div class="space-y-2 text-sm">
+                    <div class="flex justify-between">
+                        <span style="color: #7a8599;">Pazar Değeri</span>
+                        <span class="font-mono font-semibold" style="color: #00ff88;"><?= formatFiyat((float)($aiDeg['pazar_degeri'] ?? 0)) ?></span>
+                    </div>
+                    <?php
+                        $fark = ($ilan['fiyat'] > 0 && ($aiDeg['pazar_degeri'] ?? 0) > 0)
+                            ? round((($ilan['fiyat'] - $aiDeg['pazar_degeri']) / $aiDeg['pazar_degeri']) * 100)
+                            : 0;
+                        $farkRenk = $fark > 0 ? '#ff3366' : '#00ff88';
+                        $farkLabel = $fark > 0 ? "+%{$fark} pahalı" : "%". abs($fark) . " uygun";
+                    ?>
+                    <div class="flex justify-between">
+                        <span style="color: #7a8599;">Fark</span>
+                        <span class="font-mono font-semibold" style="color: <?= $farkRenk ?>;"><?= $farkLabel ?></span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span style="color: #7a8599;">Pazarlık Skoru</span>
+                        <span class="font-mono"><?= e($aiDeg['pazarlik_skoru'] ?? '-') ?>/100</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span style="color: #7a8599;">Fırsat Seviyesi</span>
+                        <?php
+                            $fRenk = match($aiDeg['firsat_seviyesi'] ?? '') {
+                                'yuksek' => '#00ff88', 'orta' => '#ffaa00', default => '#ff3366'
+                            };
+                        ?>
+                        <span class="font-semibold" style="color:<?= $fRenk ?>;"><?= e(strtoupper($aiDeg['firsat_seviyesi'] ?? '-')) ?></span>
+                    </div>
+                    <?php if (!empty($aiDeg['degerleme_notu'])): ?>
+                    <p class="text-xs mt-2 pt-2 border-t" style="border-color: rgba(255,255,255,0.04); color: #7a8599;"><?= e($aiDeg['degerleme_notu']) ?></p>
+                    <?php endif; ?>
+                    <?php if (!empty($aiDeg['tavsiye'])): ?>
+                    <p class="text-xs italic" style="color: #00d4ff;"><?= e($aiDeg['tavsiye']) ?></p>
+                    <?php endif; ?>
+                </div>
+                <?php else: ?>
+                <p class="text-xs" style="color: #7a8599;">AI değerleme için "Değerle" butonuna tıklayın.</p>
+                <?php endif; ?>
+                <div x-show="aiSonuc.degerle" x-html="aiSonuc.degerle" class="mt-3"></div>
+            </div>
+
+            <!-- ═══ PAZARLIK SKORU (Satıcı Psikoloji) KARTI ═══ -->
+            <div class="rounded-2xl p-5" style="background: rgba(15,23,62,0.6); border: 1px solid rgba(255,170,0,0.15);">
+                <div class="flex items-center justify-between mb-3">
+                    <h3 class="text-sm font-semibold" style="color: #e8ecf4;">🧠 Pazarlık Analizi</h3>
+                    <button @click="aiCagir('satici_psikoloji', <?= $id ?>)"
+                            :disabled="aiYukleniyor.psikoloji"
+                            class="text-xs px-3 py-1 rounded-lg transition-colors"
+                            style="background: rgba(255,170,0,0.15); color: #ffaa00; border: 1px solid rgba(255,170,0,0.3);">
+                        <span x-show="!aiYukleniyor.psikoloji">Analiz Et</span>
+                        <span x-show="aiYukleniyor.psikoloji">⏳ Analiz...</span>
+                    </button>
+                </div>
+                <?php if ($psikoloji): ?>
+                <div class="space-y-3">
+                    <!-- Dairesel progress -->
+                    <div class="flex items-center gap-4">
+                        <div class="relative w-16 h-16 flex-shrink-0">
+                            <svg class="w-16 h-16 -rotate-90" viewBox="0 0 64 64">
+                                <circle cx="32" cy="32" r="28" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="4"/>
+                                <circle cx="32" cy="32" r="28" fill="none" stroke="#ffaa00" stroke-width="4"
+                                        stroke-dasharray="<?= round(175.93 * ($psikoloji['pazarlik_motivasyonu'] ?? 0) / 100) ?> 175.93"
+                                        stroke-linecap="round"/>
+                            </svg>
+                            <div class="absolute inset-0 flex items-center justify-center text-sm font-bold font-mono" style="color:#ffaa00;">
+                                <?= (int)($psikoloji['pazarlik_motivasyonu'] ?? 0) ?>
+                            </div>
                         </div>
-                        <div class="flex justify-between">
-                            <span style="color: #7a8599;">Pazarlık Skoru</span>
-                            <span class="font-mono"><?= e($aiDeg['pazarlik_skoru'] ?? '-') ?>/100</span>
+                        <div>
+                            <div class="text-xs" style="color:#7a8599;">Pazarlık Motivasyonu</div>
+                            <div class="text-xs mt-1" style="color:#7a8599;">Aciliyet: <span class="font-mono" style="color:#e8ecf4;"><?= (int)($psikoloji['aciliyet_seviyesi'] ?? 5) ?>/10</span></div>
+                            <div class="text-xs mt-0.5" style="color:#7a8599;">Tahmini Payı: <span class="font-mono" style="color:#00ff88;">%<?= (int)($psikoloji['tahmini_pazarlik_payi_yuzde'] ?? 0) ?></span></div>
                         </div>
-                        <div class="flex justify-between">
-                            <span style="color: #7a8599;">Fırsat Seviyesi</span>
-                            <span class="font-semibold"><?= e(strtoupper($aiDeg['firsat_seviyesi'] ?? '-')) ?></span>
-                        </div>
-                        <?php if (!empty($aiDeg['degerleme_notu'])): ?>
-                        <p class="text-xs mt-2 pt-2 border-t" style="border-color: rgba(255,255,255,0.04); color: #7a8599;"><?= e($aiDeg['degerleme_notu']) ?></p>
-                        <?php endif; ?>
+                    </div>
+                    <!-- İpuçları etiketleri -->
+                    <?php if (!empty($psikoloji['tespit_edilen_ipuclari'])): ?>
+                    <div class="flex flex-wrap gap-1.5">
+                        <?php foreach ($psikoloji['tespit_edilen_ipuclari'] as $ipucu): ?>
+                        <span class="text-xs px-2 py-0.5 rounded-full" style="background:rgba(255,170,0,0.1);color:#ffaa00;border:1px solid rgba(255,170,0,0.2);">
+                            <?= e($ipucu) ?>
+                        </span>
+                        <?php endforeach; ?>
                     </div>
                     <?php endif; ?>
-                    <div x-html="aiSonuc"></div>
+                    <?php if (!empty($psikoloji['onerilen_yaklasim'])): ?>
+                    <p class="text-xs pt-2 border-t" style="border-color:rgba(255,255,255,0.04);color:#7a8599;">
+                        <strong style="color:#ffaa00;">Önerilen:</strong> <?= e($psikoloji['onerilen_yaklasim']) ?>
+                    </p>
+                    <?php endif; ?>
                 </div>
-                <p x-show="!aiSonuc && <?= empty($aiDeg) ? 'true' : 'false' ?>" class="text-xs" style="color: #7a8599;">
-                    AI değerleme için "Değerle" butonuna tıklayın.
-                </p>
+                <?php else: ?>
+                <p class="text-xs" style="color: #7a8599;">Satıcı psikolojisi analizi için "Analiz Et" tıklayın.</p>
+                <?php endif; ?>
+                <div x-show="aiSonuc.psikoloji" x-html="aiSonuc.psikoloji" class="mt-3"></div>
+            </div>
+
+            <!-- ═══ EMSAL DEĞER KARTI ═══ -->
+            <div class="rounded-2xl p-5" style="background: rgba(15,23,62,0.6); border: 1px solid rgba(0,255,136,0.15);">
+                <div class="flex items-center justify-between mb-3">
+                    <h3 class="text-sm font-semibold" style="color: #e8ecf4;">📊 Emsal Değer</h3>
+                    <button @click="aiCagir('emsal_deger', <?= $id ?>)"
+                            :disabled="aiYukleniyor.emsal"
+                            class="text-xs px-3 py-1 rounded-lg transition-colors"
+                            style="background: rgba(0,255,136,0.15); color: #00ff88; border: 1px solid rgba(0,255,136,0.3);">
+                        <span x-show="!aiYukleniyor.emsal">Hesapla</span>
+                        <span x-show="aiYukleniyor.emsal">⏳ Hesap...</span>
+                    </button>
+                </div>
+                <?php if ($emsalDeger && ($emsalDeger['tahmini_deger_tl'] ?? 0) > 0): ?>
+                <div class="space-y-2 text-sm">
+                    <?php
+                        $emsalFark = ($ilan['fiyat'] > 0 && $emsalDeger['tahmini_deger_tl'] > 0)
+                            ? (float)$ilan['fiyat'] - (float)$emsalDeger['tahmini_deger_tl']
+                            : 0;
+                        $emsalRenk = $emsalFark > 0 ? '#ff3366' : '#00ff88';
+                    ?>
+                    <div class="text-center p-3 rounded-xl" style="background:rgba(255,255,255,0.03);">
+                        <div class="text-xs" style="color:#7a8599;">Tahmini Değer</div>
+                        <div class="text-2xl font-bold font-mono mt-1" style="color:<?= $emsalRenk ?>;">
+                            <?= number_format($emsalDeger['tahmini_deger_tl'], 0, ',', '.') ?> ₺
+                        </div>
+                        <div class="text-xs mt-1" style="color:#7a8599;">
+                            <?= number_format($emsalDeger['guven_araligi_alt'] ?? 0, 0, ',', '.') ?> -
+                            <?= number_format($emsalDeger['guven_araligi_ust'] ?? 0, 0, ',', '.') ?> ₺
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2 text-xs">
+                        <div class="p-2 rounded-lg text-center" style="background:rgba(255,255,255,0.03);">
+                            <div style="color:#7a8599;">m² Birim Fiyat</div>
+                            <div class="font-mono mt-0.5" style="color:#e8ecf4;"><?= number_format($emsalDeger['metrekare_birim_fiyat'] ?? 0, 0, ',', '.') ?> ₺</div>
+                        </div>
+                        <div class="p-2 rounded-lg text-center" style="background:rgba(255,255,255,0.03);">
+                            <div style="color:#7a8599;">Bölge Ort.</div>
+                            <div class="font-mono mt-0.5" style="color:#e8ecf4;"><?= number_format($emsalDeger['bolge_ortalamasi'] ?? 0, 0, ',', '.') ?> ₺</div>
+                        </div>
+                    </div>
+                    <?php if (!empty($emsalDeger['degerlendirme'])): ?>
+                    <p class="text-xs pt-2 border-t" style="border-color:rgba(255,255,255,0.04);color:#7a8599;"><?= e($emsalDeger['degerlendirme']) ?></p>
+                    <?php endif; ?>
+                </div>
+                <?php else: ?>
+                <p class="text-xs" style="color: #7a8599;">Emsal değer tahmini için "Hesapla" tıklayın.</p>
+                <?php endif; ?>
+                <div x-show="aiSonuc.emsal" x-html="aiSonuc.emsal" class="mt-3"></div>
             </div>
 
             <!-- İşlem Butonları -->
@@ -226,7 +422,7 @@ require_once APP_DIR . '/views/layout/header.php';
                    style="background: rgba(0,212,255,0.08); color: #00d4ff; border: 1px solid rgba(0,212,255,0.2);">
                     ✏️ Düzenle
                 </a>
-                <button onclick="whatsappGonder(<?= $id ?>)"
+                <button onclick="detayWhatsapp(<?= $id ?>)"
                         class="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-sm transition-colors"
                         style="background: rgba(0,255,136,0.08); color: #00ff88; border: 1px solid rgba(0,255,136,0.2);">
                     💬 WhatsApp
@@ -236,11 +432,46 @@ require_once APP_DIR . '/views/layout/header.php';
                    style="background: rgba(139,92,246,0.08); color: #8b5cf6; border: 1px solid rgba(139,92,246,0.2);">
                     📄 Rapor
                 </a>
+                <button @click="sesliNotAcik = !sesliNotAcik"
+                        class="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-sm transition-colors"
+                        style="background: rgba(255,51,102,0.08); color: #ff3366; border: 1px solid rgba(255,51,102,0.2);">
+                    🎤 Sesli Not
+                </button>
+                <button id="eslestir-btn" onclick="otomatikEslestir(<?= $id ?>)"
+                        class="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-sm transition-colors"
+                        style="background: rgba(168,85,247,0.08); color: #a855f7; border: 1px solid rgba(168,85,247,0.2);">
+                    🔗 Eşleştir
+                </button>
                 <button @click="silOnay = true"
                         class="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-sm transition-colors"
                         style="background: rgba(255,51,102,0.08); color: #ff3366; border: 1px solid rgba(255,51,102,0.2);">
                     🗑️ Sil
                 </button>
+            </div>
+
+            <!-- Sesli Not Paneli -->
+            <div x-show="sesliNotAcik" x-transition class="rounded-2xl p-5" style="background: rgba(15,23,62,0.6); border: 1px solid rgba(255,51,102,0.2);">
+                <h3 class="text-sm font-semibold mb-3" style="color: #e8ecf4;">🎤 Sesli Not</h3>
+                <input type="hidden" id="hedef_tip" value="ilan">
+                <input type="hidden" id="hedef_id" value="<?= $id ?>">
+                <div class="flex flex-col items-center gap-3">
+                    <button id="record-btn" class="record-btn">
+                        <span id="record-icon">🎙</span>
+                    </button>
+                    <span id="record-text" class="text-xs" style="color:#7a8599;">Kayıt başlatmak için tıkla</span>
+                    <span id="record-timer" class="font-mono text-lg" style="color:#ff3366;">00:00</span>
+                    <div id="waveform" class="waveform hidden">
+                        <div class="wave-bar"></div><div class="wave-bar"></div><div class="wave-bar"></div>
+                        <div class="wave-bar"></div><div class="wave-bar"></div><div class="wave-bar"></div>
+                    </div>
+                    <div id="transcript-box" class="hidden w-full">
+                        <textarea id="transcript-text" class="glass-input w-full text-xs rounded-lg p-2" rows="3" readonly></textarea>
+                        <div class="flex gap-2 mt-2">
+                            <button id="copy-transcript" class="btn btn-ghost text-xs flex-1">📋 Kopyala</button>
+                        </div>
+                    </div>
+                    <span id="kayit-status" class="text-xs" style="color:#7a8599;"></span>
+                </div>
             </div>
 
             <!-- Silme Onayı -->
@@ -268,5 +499,36 @@ require_once APP_DIR . '/views/layout/header.php';
         </div>
     </div>
 </main>
+
+<!-- AI Çağrı JS -->
+<script>
+function aiCagir(islem, ilanId) {
+    const anaVeri = Alpine.$data(document.querySelector('[x-data]'));
+    const key = {fotograf_analiz: 'fotograf', ilan_degerle: 'degerle', satici_psikoloji: 'psikoloji', emsal_deger: 'emsal'}[islem] || islem;
+
+    anaVeri.aiYukleniyor[key] = true;
+
+    fetch('/api/ai.php?islem=' + islem, {
+        method: 'POST',
+        headers: csrfHeaders(),
+        body: JSON.stringify({ ilan_id: ilanId }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        anaVeri.aiYukleniyor[key] = false;
+        if (data.success) {
+            showFlash('AI analiz tamamlandı.', 'success');
+            // Sayfayı yenile (sonuçlar PHP'de render edilir)
+            setTimeout(() => window.location.reload(), 1200);
+        } else {
+            showFlash(data.message || 'AI analiz başarısız.', 'error');
+        }
+    })
+    .catch(() => {
+        anaVeri.aiYukleniyor[key] = false;
+        showFlash('Sunucu hatası.', 'error');
+    });
+}
+</script>
 
 <?php require_once APP_DIR . '/views/layout/footer.php'; ?>

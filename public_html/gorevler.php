@@ -15,7 +15,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $pageTitle = 'Görev Merkezi';
-$extraJs   = 'gorevler.js';
+$extraJs   = ['gorevler.js', 'sesli-not.js'];
 require_once APP_DIR . '/views/layout/header.php';
 
 // Danışmanlar listesi (admin/broker için)
@@ -192,17 +192,55 @@ try {
     </div>
 
     <!-- AI Senaryo Modal -->
-    <div x-show="aiModal" x-transition @click.away="aiModal=false"
+    <div id="ai-senaryo-modal" x-show="aiModal" x-transition @click.away="aiModal=false"
          class="fixed inset-0 z-50 flex items-center justify-center p-4"
          style="background: rgba(0,0,0,0.7); backdrop-filter: blur(4px);">
-        <div class="w-full max-w-lg rounded-2xl overflow-hidden shadow-2xl"
-             style="background: #0c1129; border: 1px solid rgba(255,255,255,0.08);">
+        <div class="w-full max-w-lg rounded-2xl overflow-hidden shadow-2xl max-h-[85vh] flex flex-col"
+             style="background: #0c1129; border: 1px solid rgba(139,92,246,0.2);">
             <div class="flex items-center justify-between px-6 py-4 border-b" style="border-color: rgba(255,255,255,0.06);">
                 <span class="font-semibold text-sm" style="color: #8b5cf6;">🤖 AI Konuşma Senaryosu</span>
-                <button @click="aiModal=false" style="color:#7a8599;">✕</button>
+                <div class="flex items-center gap-2">
+                    <button onclick="copySenaryo()" class="text-xs px-2 py-1 rounded-lg" style="background:rgba(255,255,255,0.05);color:#7a8599;">📋 Kopyala</button>
+                    <button @click="aiModal=false" style="color:#7a8599;">✕</button>
+                </div>
+            </div>
+            <div class="p-6 overflow-y-auto">
+                <div id="ai-senaryo-loader" class="hidden text-center py-8">
+                    <div class="loader-lg mx-auto mb-3"></div>
+                    <p class="text-xs" style="color:#7a8599;">AI senaryo hazırlanıyor...</p>
+                </div>
+                <div id="ai-senaryo-content">
+                    <pre class="text-sm whitespace-pre-wrap leading-relaxed" style="color:#e8ecf4;font-family:'Outfit',sans-serif;" x-text="aiSenaryo"></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sesli Not Modal -->
+    <div id="sesli-not-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4"
+         style="background: rgba(0,0,0,0.7); backdrop-filter: blur(4px);">
+        <div class="w-full max-w-sm rounded-2xl overflow-hidden shadow-2xl"
+             style="background: #0c1129; border: 1px solid rgba(255,51,102,0.2);">
+            <div class="flex items-center justify-between px-6 py-4 border-b" style="border-color: rgba(255,255,255,0.06);">
+                <span class="font-semibold text-sm" style="color: #ff3366;">🎤 Sesli Not</span>
+                <button onclick="document.getElementById('sesli-not-modal').classList.add('hidden')" style="color:#7a8599;">✕</button>
             </div>
             <div class="p-6">
-                <pre class="text-sm whitespace-pre-wrap leading-relaxed" style="color:#e8ecf4;font-family:'Outfit',sans-serif;" x-text="aiSenaryo"></pre>
+                <input type="hidden" id="hedef_tip" value="gorev">
+                <input type="hidden" id="hedef_id" value="">
+                <div class="flex flex-col items-center gap-3">
+                    <button id="record-btn" class="record-btn">
+                        <span id="record-icon">🎙</span>
+                    </button>
+                    <span id="record-text" class="text-xs" style="color:#7a8599;">Kayıt başlat</span>
+                    <span id="record-timer" class="font-mono text-lg" style="color:#ff3366;">00:00</span>
+                    <div id="waveform" class="waveform hidden" style="width:100%;"></div>
+                    <div id="transcript-box" class="hidden w-full">
+                        <textarea id="transcript-text" class="glass-input w-full text-xs rounded-lg p-2" rows="3" readonly></textarea>
+                        <button id="copy-transcript" class="btn btn-ghost text-xs w-full mt-2">📋 Kopyala</button>
+                    </div>
+                    <span id="kayit-status" class="text-xs" style="color:#7a8599;"></span>
+                </div>
             </div>
         </div>
     </div>
