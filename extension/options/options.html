@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EmlakRadar Clipper — Ayarlar</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #060a1a; color: #e8ecf4; font-size: 14px; padding: 0; }
+  .container { max-width: 560px; margin: 0 auto; padding: 32px 24px; }
+  .header { display: flex; align-items: center; gap: 12px; margin-bottom: 32px; }
+  .header-icon { font-size: 32px; }
+  .header h1 { font-size: 20px; font-weight: 700; color: #e8ecf4; }
+  .header p  { font-size: 13px; color: #7a8599; margin-top: 2px; }
+  .card { background: rgba(15,23,62,0.6); border: 1px solid rgba(255,255,255,0.06); border-radius: 16px; padding: 24px; margin-bottom: 20px; }
+  .card h2  { font-size: 14px; font-weight: 600; color: #e8ecf4; margin-bottom: 16px; padding-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,0.06); }
+  .form-group { margin-bottom: 16px; }
+  label { display: block; font-size: 12px; font-weight: 500; color: #7a8599; margin-bottom: 6px; }
+  input[type="text"], input[type="email"], input[type="password"], input[type="url"] {
+    width: 100%; padding: 10px 12px; border-radius: 10px;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
+    color: #e8ecf4; font-size: 13px; outline: none; transition: border-color 0.2s;
+  }
+  input:focus { border-color: rgba(0,212,255,0.4); }
+  input::placeholder { color: #4a5568; }
+  .btn { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 10px 20px; border-radius: 10px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; transition: all 0.2s; }
+  .btn-primary { background: linear-gradient(135deg,rgba(0,212,255,0.2),rgba(139,92,246,0.2)); border: 1px solid rgba(0,212,255,0.3); color: #00d4ff; }
+  .btn-primary:hover { background: linear-gradient(135deg,rgba(0,212,255,0.3),rgba(139,92,246,0.3)); }
+  .btn-secondary { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); color: #7a8599; }
+  .btn-secondary:hover { color: #e8ecf4; }
+  .btn-row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .alert { padding: 10px 14px; border-radius: 10px; font-size: 12px; margin-top: 12px; display: none; }
+  .alert.success { background: rgba(0,255,136,0.1); border: 1px solid rgba(0,255,136,0.2); color: #00ff88; }
+  .alert.error   { background: rgba(255,51,102,0.1); border: 1px solid rgba(255,51,102,0.2); color: #ff3366; }
+  .alert.info    { background: rgba(0,212,255,0.1); border: 1px solid rgba(0,212,255,0.2); color: #00d4ff; }
+  .toggle-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .toggle-label { font-size: 13px; color: #e8ecf4; }
+  .toggle-sub { font-size: 11px; color: #7a8599; margin-top: 2px; }
+  .toggle { position: relative; width: 40px; height: 22px; }
+  .toggle input { display: none; }
+  .toggle-slider { position: absolute; inset: 0; background: rgba(255,255,255,0.1); border-radius: 11px; cursor: pointer; transition: 0.3s; }
+  .toggle input:checked + .toggle-slider { background: rgba(0,212,255,0.4); }
+  .toggle-slider:before { content:''; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; background: white; border-radius: 50%; transition: 0.3s; }
+  .toggle input:checked + .toggle-slider:before { transform: translateX(18px); }
+  .stat-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; }
+  .stat-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 12px; text-align: center; }
+  .stat-value { font-size: 22px; font-weight: 700; color: #00d4ff; }
+  .stat-label { font-size: 11px; color: #7a8599; margin-top: 2px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <div class="header-icon">📡</div>
+    <div>
+      <h1>EmlakRadar Clipper</h1>
+      <p>Extension Ayarları</p>
+    </div>
+  </div>
+
+  <!-- Panel Bağlantısı -->
+  <div class="card">
+    <h2>🔗 Panel Bağlantısı</h2>
+    <div class="form-group">
+      <label>Panel URL</label>
+      <input type="url" id="panel-url" placeholder="https://panel.emlakradar.com" />
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" id="test-btn">🔌 Bağlantı Test Et</button>
+    </div>
+    <div class="alert" id="baglanti-alert"></div>
+  </div>
+
+  <!-- Giriş -->
+  <div class="card" id="giris-card">
+    <h2>👤 Panel Girişi</h2>
+    <div id="giris-durum" class="alert info" style="display:block;">⏳ Giriş durumu kontrol ediliyor...</div>
+    <div id="giris-form">
+      <div class="form-group">
+        <label>E-posta</label>
+        <input type="email" id="email" placeholder="danismanik@emlakradar.com" />
+      </div>
+      <div class="form-group">
+        <label>Şifre</label>
+        <input type="password" id="sifre" placeholder="••••••••" />
+      </div>
+      <button class="btn btn-primary" id="giris-btn" style="width:100%;">🔐 Giriş Yap</button>
+      <div class="alert" id="giris-alert"></div>
+    </div>
+  </div>
+
+  <!-- Tercihler -->
+  <div class="card">
+    <h2>⚙️ Tercihler</h2>
+    <div class="toggle-row">
+      <div>
+        <div class="toggle-label">Otomatik Parse</div>
+        <div class="toggle-sub">Emlak sitelerinde ilan sayfasına girilince otomatik parse et</div>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="oto-parse" checked>
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <div class="toggle-row">
+      <div>
+        <div class="toggle-label">Sahte İlan Uyarısı</div>
+        <div class="toggle-sub">Aynı telefondan çok sayıda ilan varsa uyar</div>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="sahte-uyari" checked>
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <div class="toggle-row">
+      <div>
+        <div class="toggle-label">Masaüstü Bildirimleri</div>
+        <div class="toggle-sub">Ekleme başarılı olduğunda bildirim göster</div>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="bildirimler" checked>
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <button class="btn btn-primary" id="tercih-kaydet-btn" style="margin-top:8px;">💾 Tercihleri Kaydet</button>
+    <div class="alert" id="tercih-alert"></div>
+  </div>
+
+  <!-- İstatistikler -->
+  <div class="card">
+    <h2>📊 İstatistikler</h2>
+    <div class="stat-grid">
+      <div class="stat-card"><div class="stat-value" id="stat-eklenen">0</div><div class="stat-label">Eklenen İlan</div></div>
+      <div class="stat-card"><div class="stat-value" id="stat-sahte">0</div><div class="stat-label">Sahte Uyarı</div></div>
+      <div class="stat-card"><div class="stat-value" id="stat-kaydedilen">0</div><div class="stat-label">Kaydedilen</div></div>
+    </div>
+    <button class="btn btn-secondary" id="istatistik-sifirla" style="margin-top:12px;width:100%;">🗑️ İstatistikleri Sıfırla</button>
+  </div>
+
+</div>
+<script src="options.js"></script>
+</body>
+</html>

@@ -3,43 +3,153 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>EmlakRadar Pro — Çevrimdışı</title>
+<title>Çevrimdışı — EmlakRadar Pro</title>
+<meta name="theme-color" content="#00d4ff">
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+  @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&display=swap');
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root { --cyan: #00d4ff; --dark: #060a1a; --card: rgba(15,23,62,0.6); }
   body {
-    background: #060a1a;
-    color: #e2e8f0;
-    font-family: 'Outfit', 'Segoe UI', sans-serif;
+    font-family: 'Outfit', -apple-system, sans-serif;
+    background: var(--dark);
+    color: #e8ecf4;
+    min-height: 100vh;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-    min-height: 100vh;
+    padding: 20px;
+  }
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 60% 60% at 20% 20%, rgba(0,212,255,0.06) 0%, transparent 60%),
+      radial-gradient(ellipse 50% 50% at 80% 80%, rgba(139,92,246,0.05) 0%, transparent 60%);
+    pointer-events: none;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 24px;
+    padding: 40px 32px;
+    max-width: 480px;
+    width: 100%;
     text-align: center;
-    padding: 2rem;
+    box-shadow: 0 24px 80px rgba(0,0,0,0.4);
   }
-  .icon { font-size: 5rem; margin-bottom: 1.5rem; }
-  h1 { font-size: 1.75rem; font-weight: 700; margin-bottom: 0.75rem; }
-  p  { color: #64748b; font-size: 1rem; line-height: 1.6; margin-bottom: 2rem; }
-  button {
-    background: rgba(0,212,255,0.15);
-    color: #00d4ff;
+  .icon { font-size: 64px; margin-bottom: 20px; animation: float 3s ease-in-out infinite; }
+  @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-10px)} }
+  h1 { font-size: 24px; font-weight: 700; color: #e8ecf4; margin-bottom: 8px; }
+  p  { font-size: 14px; color: #7a8599; line-height: 1.6; margin-bottom: 24px; }
+  .btn-retry {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 12px 28px; border-radius: 12px;
+    background: linear-gradient(135deg, rgba(0,212,255,0.2), rgba(139,92,246,0.2));
     border: 1px solid rgba(0,212,255,0.3);
-    padding: 0.75rem 2rem;
-    border-radius: 0.75rem;
-    font-size: 1rem;
-    cursor: pointer;
-    font-family: inherit;
-    font-weight: 600;
+    color: var(--cyan); font-size: 14px; font-weight: 600;
+    cursor: pointer; transition: all 0.2s; text-decoration: none;
   }
-  button:hover { background: rgba(0,212,255,0.25); }
+  .btn-retry:hover { background: linear-gradient(135deg,rgba(0,212,255,0.3),rgba(139,92,246,0.3)); transform: translateY(-1px); }
+  .divider { border: none; border-top: 1px solid rgba(255,255,255,0.06); margin: 24px 0; }
+  .cached-title { font-size: 13px; font-weight: 600; color: #e8ecf4; margin-bottom: 12px; text-align: left; }
+  .cached-list { list-style: none; text-align: left; }
+  .cached-list li { padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
+  .cached-list a {
+    font-size: 13px; color: #7a8599; text-decoration: none;
+    display: flex; align-items: center; gap: 8px; transition: color 0.2s;
+  }
+  .cached-list a:hover { color: var(--cyan); }
+  .quick-links { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 20px; }
+  .quick-link {
+    padding: 12px; border-radius: 12px; text-align: center;
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);
+    text-decoration: none; transition: all 0.2s;
+  }
+  .quick-link:hover { background: rgba(255,255,255,0.06); border-color: rgba(0,212,255,0.2); }
+  .quick-link .ql-icon  { font-size: 20px; display: block; margin-bottom: 4px; }
+  .quick-link .ql-label { font-size: 12px; color: #7a8599; }
+  .status-bar {
+    position: fixed; top: 0; left: 0; right: 0;
+    padding: 8px 16px; font-size: 12px; text-align: center;
+    background: rgba(255,51,102,0.15); color: #ff6b8a;
+    border-bottom: 1px solid rgba(255,51,102,0.2);
+  }
+  .online-banner {
+    background: rgba(0,255,136,0.1); color: #00ff88;
+    border-bottom: 1px solid rgba(0,255,136,0.2);
+  }
 </style>
 </head>
 <body>
-<div>
-  <div class="icon">📡</div>
-  <h1>İnternet Bağlantısı Yok</h1>
-  <p>EmlakRadar Pro çevrimdışı modda çalışıyor.<br>İnternet bağlantınızı kontrol edip tekrar deneyin.</p>
-  <button onclick="window.location.reload()">🔄 Tekrar Dene</button>
+
+<div class="status-bar" id="status-bar">
+  📡 İnternet bağlantısı yok
 </div>
+
+<div class="card">
+  <div class="icon">📡</div>
+  <h1>Çevrimdışısınız</h1>
+  <p>İnternet bağlantınız kesildi. Son önbelleğe alınan veriler gösterilmektedir. Bağlantı sağlandığında otomatik güncellenecektir.</p>
+
+  <a href="javascript:location.reload()" class="btn-retry">
+    🔄 Yeniden Dene
+  </a>
+
+  <hr class="divider">
+
+  <div class="cached-title">📌 Hızlı Erişim</div>
+  <div class="quick-links">
+    <a href="/dashboard.php" class="quick-link"><span class="ql-icon">📊</span><span class="ql-label">Dashboard</span></a>
+    <a href="/gorevler.php"  class="quick-link"><span class="ql-icon">✅</span><span class="ql-label">Görevler</span></a>
+    <a href="/ilanlar.php"   class="quick-link"><span class="ql-icon">🏠</span><span class="ql-label">İlanlar</span></a>
+    <a href="/musteriler.php" class="quick-link"><span class="ql-icon">👥</span><span class="ql-label">Müşteriler</span></a>
+  </div>
+
+  <hr class="divider">
+
+  <!-- localStorage'dan görev listesi -->
+  <div id="offline-gorevler" style="display:none;">
+    <div class="cached-title">🗒️ Son Görüntülenen Görevler</div>
+    <ul class="cached-list" id="gorev-listesi"></ul>
+  </div>
+</div>
+
+<script>
+  // Çevrimiçi/çevrimdışı durum
+  function durumGuncelle() {
+    const bar = document.getElementById('status-bar');
+    if (navigator.onLine) {
+      bar.className = 'status-bar online-banner';
+      bar.textContent = '✅ Bağlantı geri geldi! Yenileniyor...';
+      setTimeout(() => location.reload(), 1500);
+    } else {
+      bar.className = 'status-bar';
+      bar.textContent = '📡 İnternet bağlantısı yok';
+    }
+  }
+
+  window.addEventListener('online',  durumGuncelle);
+  window.addEventListener('offline', durumGuncelle);
+  durumGuncelle();
+
+  // localStorage'dan görev listesi yükle
+  try {
+    const gorevler = JSON.parse(localStorage.getItem('emlakradar_gorevler') || '[]');
+    if (gorevler.length > 0) {
+      document.getElementById('offline-gorevler').style.display = 'block';
+      const liste = document.getElementById('gorev-listesi');
+      gorevler.slice(0, 8).forEach(g => {
+        const li = document.createElement('li');
+        li.innerHTML = `<a href="/gorevler.php">
+          <span>${g.tip === 'randevu' ? '📅' : g.tip === 'arama' ? '📞' : '✅'}</span>
+          <span>${g.baslik || 'Görev'}</span>
+        </a>`;
+        liste.appendChild(li);
+      });
+    }
+  } catch {}
+</script>
 </body>
 </html>

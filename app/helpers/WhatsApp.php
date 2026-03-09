@@ -1,99 +1,175 @@
 <?php
 /**
- * EmlakRadar Pro - WhatsApp Business API Helper
+ * EmlakRadar Pro — WhatsApp Entegrasyon Yardımcısı
+ * Mod 1: WhatsApp Web Link (her zaman çalışır)
+ * Mod 2: WhatsApp Business API (WHATSAPP_TOKEN ve WHATSAPP_PHONE_ID tanımlıysa)
  */
 
 class WhatsApp {
+
     private string $token;
     private string $phoneId;
     private string $apiUrl;
+    private bool   $apiModu;
 
-    public function __construct(string $token = '', string $phoneId = '', string $apiUrl = '') {
-        $this->token   = $token   ?: WHATSAPP_TOKEN;
-        $this->phoneId = $phoneId ?: WHATSAPP_PHONE_ID;
-        $this->apiUrl  = $apiUrl  ?: WHATSAPP_API_URL ?: 'https://graph.facebook.com/v19.0';
+    public function __construct() {
+        $this->token   = defined('WHATSAPP_TOKEN')    ? WHATSAPP_TOKEN    : '';
+        $this->phoneId = defined('WHATSAPP_PHONE_ID') ? WHATSAPP_PHONE_ID : '';
+        $this->apiUrl  = defined('WHATSAPP_API_URL')  ? WHATSAPP_API_URL  : 'https://graph.facebook.com/v19.0';
+        $this->apiModu = !empty($this->token) && !empty($this->phoneId);
     }
 
-    /**
-     * Metin mesajı gönder
-     */
-    public function sendText(string $to, string $message): array {
-        $to = $this->formatPhone($to);
-        $payload = [
+    /* ─────────────────────────────────────────────────────────────────
+     * MOD 1: WhatsApp Web Link
+     * ───────────────────────────────────────────────────────────────── */
+    public function webLink(string $telefon, string $mesaj): string {
+        $tel = $this->formatTelefon($telefon);
+        return 'https://wa.me/' . $tel . '?text=' . urlencode($mesaj);
+    }
+
+    /* ─────────────────────────────────────────────────────────────────
+     * MOD 2: WhatsApp Business API — metin mesajı gönder
+     * ───────────────────────────────────────────────────────────────── */
+    public function gondер(string $telefon, string $mesaj): array {
+        if (!$this->apiModu) {
+            return [
+                'success' => false,
+                'link'    => $this->webLink($telefon, $mesaj),
+                'message' => 'API yapılandırılmamış. Web link kullanın.',
+            ];
+        }
+        return $this->apiGonder([
             'messaging_product' => 'whatsapp',
-            'to'                => $to,
+            'to'                => $this->formatTelefon($telefon),
             'type'              => 'text',
-            'text'              => ['body' => $message],
-        ];
-        return $this->send($payload);
+            'text'              => ['body' => $mesaj],
+        ]);
     }
 
-    /**
-     * Eşleştirme mesajı gönder
-     */
-    public function sendEslestirme(string $to, array $ilan, array $musteri, int $skor): array {
-        $mesaj = sprintf(
-            "🏠 *Yeni Eşleştirme — EmlakRadar Pro*\n\n" .
-            "Sayın %s,\n\n" .
-            "Size uygun bir ilan bulduk!\n\n" .
+    /* ─────────────────────────────────────────────────────────────────
+     * ŞABLON: Yeni İlan Bildirimi
+     * ───────────────────────────────────────────────────────────────── */
+    public function yeniIlanMesaji(array $musteri, array $ilan, string $ofisAd = ''): string {
+        return sprintf(
+            "Merhaba %s 👋\n\n" .
+            "Aradığınız kriterlere uygun yeni bir ilan bulduk! 🏠\n\n" .
             "📍 *%s*\n" .
-            "💰 Fiyat: *%s ₺*\n" .
+            "💰 %s ₺\n" .
+            "📐 %s m² | %s\n" .
+            "📌 %s, %s\n\n" .
+            "Detaylı bilgi ve görüntüleme randevusu için danışmanınızla iletişime geçin.\n\n" .
+            "_%s_",
+            $musteri['ad_soyad'] ?? 'Değerli Müşterimiz',
+            $ilan['baslik'] ?? '',
+            number_format($ilan['fiyat'] ?? 0, 0, ',', '.'),
+            $ilan['metrekare'] ?? '-',
+            $ilan['oda_sayisi'] ?? '-',
+            $ilan['mahalle'] ?? '',
+            $ilan['ilce'] ?? '',
+            $ofisAd ?: 'EmlakRadar Pro'
+        );
+    }
+
+    /* ─────────────────────────────────────────────────────────────────
+     * ŞABLON: Fiyat Düşüşü Bildirimi
+     * ───────────────────────────────────────────────────────────────── */
+    public function fiyatDususMesaji(array $musteri, array $ilan, float $eskiFiyat): string {
+        $dusus = $eskiFiyat - ($ilan['fiyat'] ?? 0);
+        $dususPct = $eskiFiyat > 0 ? round($dusus / $eskiFiyat * 100, 1) : 0;
+        return sprintf(
+            "Merhaba %s 📢\n\n" .
+            "İlgilendiğiniz ilanda *fiyat düşüşü* gerçekleşti! 🎉\n\n" .
+            "🏠 *%s*\n" .
+            "💰 Eski fiyat: ~%s ₺~\n" .
+            "✅ Yeni fiyat: *%s ₺*\n" .
+            "📉 İndirim: %s ₺ (%%%s)\n\n" .
+            "Fırsatı kaçırmadan hemen iletişime geçin!",
+            $musteri['ad_soyad'] ?? 'Değerli Müşterimiz',
+            $ilan['baslik'] ?? '',
+            number_format($eskiFiyat, 0, ',', '.'),
+            number_format($ilan['fiyat'] ?? 0, 0, ',', '.'),
+            number_format($dusus, 0, ',', '.'),
+            $dususPct
+        );
+    }
+
+    /* ─────────────────────────────────────────────────────────────────
+     * ŞABLON: Eşleştirme Bildirimi
+     * ───────────────────────────────────────────────────────────────── */
+    public function eslestirmeMesaji(array $musteri, array $ilan, int $skor): string {
+        return sprintf(
+            "Merhaba %s 🎯\n\n" .
+            "Kriterlerinize *%%%d uyumlu* yeni bir ilan bulduk!\n\n" .
+            "🏠 *%s*\n" .
+            "💰 %s ₺\n" .
             "📐 %s m² | %s\n" .
             "📍 %s / %s\n\n" .
-            "✅ Uyum Skoru: *%%%d*\n\n" .
-            "Detaylar için danışmanınızla iletişime geçin.",
-            $musteri['ad_soyad'] ?? '',
+            "Detaylar için danışmanınızla iletişime geçin. 📞",
+            $musteri['ad_soyad'] ?? 'Değerli Müşterimiz',
+            $skor,
             $ilan['baslik'] ?? '',
             number_format($ilan['fiyat'] ?? 0, 0, ',', '.'),
             $ilan['metrekare'] ?? '-',
             $ilan['oda_sayisi'] ?? '-',
             $ilan['ilce'] ?? '',
-            $ilan['mahalle'] ?? '',
-            $skor
+            $ilan['mahalle'] ?? ''
         );
-        return $this->sendText($to, $mesaj);
     }
 
-    /**
-     * Görev hatırlatması gönder
-     */
-    public function sendGorevHatirlatma(string $to, array $gorev): array {
-        $mesaj = sprintf(
-            "⏰ *Görev Hatırlatması — EmlakRadar Pro*\n\n" .
-            "Görev: *%s*\n" .
-            "Tarih: %s %s\n" .
-            "Öncelik: %s\n\n" .
-            "EmlakRadar Panel üzerinden göreve ulaşabilirsiniz.",
+    /* ─────────────────────────────────────────────────────────────────
+     * ŞABLON: Rapor Gönderimi
+     * ───────────────────────────────────────────────────────────────── */
+    public function raporMesaji(array $musteri, string $raporTipi, string $raporUrl): string {
+        $tipAd = match($raporTipi) {
+            'gerceklik_tokadi' => 'Gerçeklik Tokadı',
+            'roi'              => 'ROI / Yatırım Getiri Analizi',
+            'portfoy'          => 'Portföy Özet',
+            default            => ucfirst($raporTipi),
+        };
+        return sprintf(
+            "Merhaba %s 📊\n\n" .
+            "Sizin için *%s Raporu* hazırlandı.\n\n" .
+            "🔗 Raporu görüntülemek için:\n%s\n\n" .
+            "_EmlakRadar Pro_",
+            $musteri['ad_soyad'] ?? 'Değerli Müşterimiz',
+            $tipAd,
+            $raporUrl
+        );
+    }
+
+    /* ─────────────────────────────────────────────────────────────────
+     * ŞABLON: Görev / Randevu Hatırlatması
+     * ───────────────────────────────────────────────────────────────── */
+    public function gorevHatirlatmaMesaji(string $musteriAdi, array $gorev): string {
+        return sprintf(
+            "Merhaba %s ⏰\n\n" .
+            "Randevunuzu hatırlatmak istedik:\n\n" .
+            "📋 %s\n" .
+            "📅 %s\n" .
+            "📍 %s\n\n" .
+            "Görüşmek üzere! 🤝\n_EmlakRadar Pro_",
+            $musteriAdi,
             $gorev['baslik'] ?? '',
-            $gorev['tarih'] ?? '',
-            $gorev['saat'] ?? '',
-            strtoupper($gorev['oncelik'] ?? '')
+            isset($gorev['tarih_saat']) ? date('d.m.Y H:i', strtotime($gorev['tarih_saat'])) : '-',
+            $gorev['lokasyon'] ?? 'Ofisimiz'
         );
-        return $this->sendText($to, $mesaj);
     }
 
-    /**
-     * Numara formatlama (+90 ülke kodu)
-     */
-    private function formatPhone(string $phone): string {
-        $phone = preg_replace('/\D/', '', $phone);
-        if (strlen($phone) === 10 && $phone[0] === '0') {
-            $phone = '90' . substr($phone, 1);
-        } elseif (strlen($phone) === 10) {
-            $phone = '90' . $phone;
-        }
-        return $phone;
+    /* ─────────────────────────────────────────────────────────────────
+     * Hem web link hem API durumunu döndür
+     * ───────────────────────────────────────────────────────────────── */
+    public function durum(): array {
+        return [
+            'api_modu'  => $this->apiModu,
+            'web_link'  => true,
+        ];
     }
 
-    /**
-     * WhatsApp API'ye istek gönder
-     */
-    private function send(array $payload): array {
-        if (empty($this->token) || empty($this->phoneId)) {
-            return ['success' => false, 'message' => 'WhatsApp API yapılandırılmamış.'];
-        }
-
-        $url = sprintf('%s/%s/messages', $this->apiUrl, $this->phoneId);
+    /* ─────────────────────────────────────────────────────────────────
+     * ÖZEL: WhatsApp Business API isteği
+     * ───────────────────────────────────────────────────────────────── */
+    private function apiGonder(array $payload): array {
+        $url = sprintf('%s/%s/messages', rtrim($this->apiUrl, '/'), $this->phoneId);
         $ch  = curl_init($url);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
@@ -104,25 +180,45 @@ class WhatsApp {
             ],
             CURLOPT_POSTFIELDS     => json_encode($payload),
             CURLOPT_TIMEOUT        => 15,
+            CURLOPT_CONNECTTIMEOUT => 8,
             CURLOPT_SSL_VERIFYPEER => true,
         ]);
 
         $response = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $error    = curl_error($ch);
+        $httpKod  = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $hata     = curl_error($ch);
         curl_close($ch);
 
-        if ($error) {
-            return ['success' => false, 'message' => 'cURL hatası: ' . $error];
-        }
+        if ($hata) return ['success' => false, 'message' => 'cURL hatası: ' . $hata];
 
         $data = json_decode($response, true) ?? [];
-        if ($httpCode >= 200 && $httpCode < 300) {
+        if ($httpKod >= 200 && $httpKod < 300) {
             return ['success' => true, 'data' => $data];
         }
         return [
             'success' => false,
-            'message' => $data['error']['message'] ?? 'WhatsApp API hatası (HTTP ' . $httpCode . ')',
+            'message' => $data['error']['message'] ?? 'WhatsApp API hatası (HTTP ' . $httpKod . ')',
+            'http'    => $httpKod,
         ];
+    }
+
+    /* ─────────────────────────────────────────────────────────────────
+     * Telefon numarası formatlama (Türkiye: +90)
+     * ───────────────────────────────────────────────────────────────── */
+    private function formatTelefon(string $tel): string {
+        $tel = preg_replace('/\D/', '', $tel);
+        // 0532... → 90532...
+        if (strlen($tel) === 10 && $tel[0] === '0') {
+            return '90' . substr($tel, 1);
+        }
+        // 532... → 90532...
+        if (strlen($tel) === 10) {
+            return '90' . $tel;
+        }
+        // Zaten 90 ile başlıyorsa
+        if (strlen($tel) === 12 && substr($tel, 0, 2) === '90') {
+            return $tel;
+        }
+        return $tel;
     }
 }

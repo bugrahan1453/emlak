@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "EmlakRadar Clipper",
+  "version": "1.0.0",
+  "description": "Sahibinden ve emlak sitelerinden tek tıkla ilan bilgilerini EmlakRadar'a aktarın",
+  "permissions": ["activeTab", "storage", "notifications", "scripting"],
+  "host_permissions": [
+    "https://www.sahibinden.com/*",
+    "https://www.hepsiemlak.com/*",
+    "https://www.emlakjet.com/*"
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "assets/icon-16.svg",
+      "48": "assets/icon-48.svg",
+      "128": "assets/icon-128.svg"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.sahibinden.com/ilan/*"],
+      "js": ["content-scripts/common.js", "content-scripts/sahibinden.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.hepsiemlak.com/ilan/*"],
+      "js": ["content-scripts/common.js", "content-scripts/hepsiemlak.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.emlakjet.com/satilik-daire/*", "https://www.emlakjet.com/kiralik-daire/*"],
+      "js": ["content-scripts/common.js", "content-scripts/hepsiemlak.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "background/service-worker.js"
+  },
+  "options_page": "options/options.html"
+}

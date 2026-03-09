@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EmlakRadar Clipper</title>
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="logo">
+      <img src="../assets/icon-48.svg" alt="Logo" class="logo-icon">
+      <span class="logo-text">EmlakRadar <span class="logo-accent">Clipper</span></span>
+    </div>
+    <div id="baglanti-durum" class="status-badge status-loading">
+      <span class="status-dot"></span>
+      <span class="status-text">Kontrol ediliyor...</span>
+    </div>
+  </div>
+
+  <!-- Loading State -->
+  <div id="yukleniyor" class="state-container">
+    <div class="spinner"></div>
+    <p>İlan bilgileri yükleniyor...</p>
+  </div>
+
+  <!-- No Data State -->
+  <div id="veri-yok" class="state-container" style="display:none">
+    <div class="state-icon">🔍</div>
+    <p class="state-title">İlan sayfası değil</p>
+    <p class="state-desc">Sahibinden veya Hepsiemlak'ta bir ilan sayfasına gidin.</p>
+  </div>
+
+  <!-- Mevcut İlan Uyarısı -->
+  <div id="mevcut-ilan" class="state-container warn" style="display:none">
+    <div class="state-icon">⚠️</div>
+    <p class="state-title">Bu ilan zaten portföyünüzde!</p>
+    <p class="state-desc" id="mevcut-ilan-baslik"></p>
+  </div>
+
+  <!-- Ana İçerik -->
+  <div id="ilan-bilgi" style="display:none">
+
+    <!-- Fotoğraf Grid -->
+    <div id="foto-grid" class="foto-grid"></div>
+
+    <!-- İlan Özeti -->
+    <div class="ilan-ozet">
+      <div class="ilan-baslik" id="ilan-baslik">—</div>
+      <div class="ilan-meta">
+        <span class="meta-item" id="ilan-fiyat">—</span>
+        <span class="meta-sep">·</span>
+        <span class="meta-item" id="ilan-m2">—</span>
+        <span class="meta-sep">·</span>
+        <span class="meta-item" id="ilan-oda">—</span>
+      </div>
+      <div class="ilan-konum" id="ilan-konum">—</div>
+    </div>
+
+    <!-- Not Alanı -->
+    <div class="not-alani">
+      <textarea id="ilan-not" placeholder="Bu ilan için not ekleyin (opsiyonel)..." rows="2"></textarea>
+    </div>
+
+    <!-- Ekle Butonu -->
+    <button id="ekle-btn" class="btn-primary">
+      <span id="ekle-btn-text">📥 Portföye Ekle</span>
+      <span id="ekle-btn-loading" style="display:none">
+        <span class="spinner-sm"></span> Ekleniyor...
+      </span>
+    </button>
+
+    <!-- Başarı Mesajı -->
+    <div id="basari" class="success-box" style="display:none">
+      <span>✅</span>
+      <span>Portföye eklendi!</span>
+    </div>
+
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <a href="#" id="ayarlar-link">⚙️ Ayarlar</a>
+    <span class="footer-sep">·</span>
+    <span id="panel-url-kisa" style="color:#4a5568;font-size:10px;">—</span>
+  </div>
+
+</div>
+<script src="popup.js"></script>
+</body>
+</html>

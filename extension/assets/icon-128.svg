@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <rect width="128" height="128" rx="24" fill="#060a1a"/>
+  <circle cx="64" cy="64" r="56" fill="none" stroke="#00d4ff" stroke-width="1.5" opacity="0.15"/>
+  <circle cx="64" cy="64" r="42" fill="none" stroke="#00d4ff" stroke-width="1.5" opacity="0.25"/>
+  <circle cx="64" cy="64" r="28" fill="none" stroke="#00d4ff" stroke-width="1.5" opacity="0.4"/>
+  <circle cx="64" cy="64" r="14" fill="none" stroke="#00d4ff" stroke-width="1.5" opacity="0.6"/>
+  <circle cx="64" cy="64" r="5"  fill="#00d4ff"/>
+  <!-- Radar sweep -->
+  <line x1="64" y1="64" x2="104" y2="28" stroke="#00d4ff" stroke-width="2" opacity="0.7" stroke-linecap="round"/>
+  <line x1="64" y1="64" x2="100" y2="35" stroke="#00d4ff" stroke-width="1" opacity="0.3" stroke-linecap="round"/>
+  <!-- Tick marks -->
+  <line x1="64" y1="8"   x2="64" y2="18"  stroke="#00d4ff" stroke-width="2" opacity="0.4"/>
+  <line x1="120" y1="64" x2="110" y2="64" stroke="#00d4ff" stroke-width="2" opacity="0.4"/>
+  <line x1="64" y1="120" x2="64" y2="110" stroke="#00d4ff" stroke-width="2" opacity="0.4"/>
+  <line x1="8"  y1="64"  x2="18" y2="64"  stroke="#00d4ff" stroke-width="2" opacity="0.4"/>
+  <!-- Blip dots -->
+  <circle cx="94" cy="38" r="4" fill="#00ff88" opacity="0.9"/>
+  <circle cx="82" cy="52" r="3" fill="#00ff88" opacity="0.6"/>
+  <!-- EmlakRadar text -->
+  <text x="64" y="100" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="9" font-weight="700" fill="#7a8599" letter-spacing="1">EMLAKRADAR</text>
+</svg>
