@@ -375,6 +375,219 @@ window.refreshAlpine = function () {
     if (window.Alpine) window.Alpine.initTree(document.body);
 };
 
+/* ── VPS Socket.io Gerçek Zamanlı Bağlantı ──────────────────────────── */
+(function () {
+    'use strict';
+
+    // VPS Socket.io URL'i meta etiketinden al
+    const vpsUrlMeta = document.querySelector('meta[name="vps-socket-url"]');
+    if (!vpsUrlMeta || !vpsUrlMeta.content) return;
+
+    const VPS_URL = vpsUrlMeta.content; // örn: https://vps.ornek.com:3001
+
+    // Socket.io script'i dinamik yükle
+    const script = document.createElement('script');
+    script.src = VPS_URL + '/socket.io/socket.io.js';
+    script.async = true;
+    script.onload = function () { initSocket(); };
+    script.onerror = function () {
+        console.warn('[Socket] Socket.io yüklenemedi:', VPS_URL);
+    };
+    document.head.appendChild(script);
+
+    function initSocket() {
+        /* global io */
+        if (typeof io === 'undefined') return;
+
+        const socket = io(VPS_URL, {
+            transports: ['websocket', 'polling'],
+            reconnection: true,
+            reconnectionAttempts: 10,
+            reconnectionDelay: 3000,
+            timeout: 10000,
+        });
+
+        // ── Bağlantı Durumu ───────────────────────────────────────────
+        socket.on('connect', function () {
+            console.log('[Socket] VPS bağlantısı kuruldu:', socket.id);
+            updateScraperStatus('calisıyor');
+        });
+
+        socket.on('disconnect', function (reason) {
+            console.warn('[Socket] VPS bağlantısı kesildi:', reason);
+            updateScraperStatus('bağlantı_yok');
+        });
+
+        socket.on('connect_error', function (err) {
+            console.warn('[Socket] Bağlantı hatası:', err.message);
+        });
+
+        // ── YENİ İLAN ─────────────────────────────────────────────────
+        socket.on('yeni_ilan', function (event) {
+            const ilan = event.ilan;
+            if (!ilan) return;
+
+            // Sayaçları güncelle (varsa)
+            incrementCounter('realtime-yeni-sayac');
+
+            // Bildirim toast göster
+            showFlash(
+                '📡 Yeni ilan: ' + escHtml(truncateStr(ilan.baslik, 50)) +
+                ' · ' + (ilan.fiyat ? formatFiyat(ilan.fiyat) : ''),
+                'info'
+            );
+
+            // İlanlar tablosunu refreshle (sayfadaysa)
+            if (typeof window.ilanlarRefresh === 'function') {
+                window.ilanlarRefresh();
+            }
+
+            // Alpine reaktif veri güncelle (varsa)
+            if (window.Alpine) {
+                window.dispatchEvent(new CustomEvent('emlak:yeni-ilan', { detail: ilan }));
+            }
+        });
+
+        // ── KIRMIZI ALARM (Sahte İlan) ────────────────────────────────
+        socket.on('kirmizi_alarm', function (event) {
+            const ilan = event.ilan;
+            const skor = event.skor;
+            if (!ilan) return;
+
+            incrementCounter('realtime-sahte-sayac');
+
+            // Kırmızı alarm bildirimi (kalıcı)
+            showAlarmBanner(
+                '🚨 Sahte İlan Şüphesi! Skor: ' + skor + '/100',
+                truncateStr(ilan.baslik, 60),
+                event.sebepler ? event.sebepler.slice(0, 2).join(' · ') : ''
+            );
+
+            window.dispatchEvent(new CustomEvent('emlak:kirmizi-alarm', { detail: event }));
+        });
+
+        // ── FİYAT DEĞİŞİKLİĞİ ────────────────────────────────────────
+        socket.on('fiyat_degisiklik', function (event) {
+            const ilan  = event.ilan;
+            const pct   = event.degisim_yuzdesi;
+            if (!ilan) return;
+
+            incrementCounter('realtime-fiyat-sayac');
+
+            const yon  = pct < 0 ? '🔻' : '📈';
+            const isaret = pct > 0 ? '+' : '';
+            showFlash(
+                yon + ' Fiyat değişti: ' + escHtml(truncateStr(ilan.baslik, 40)) +
+                ' ' + isaret + pct + '%',
+                pct < 0 ? 'success' : 'warning'
+            );
+
+            window.dispatchEvent(new CustomEvent('emlak:fiyat-degisiklik', { detail: event }));
+        });
+
+        // ── İLAN SİLİNDİ ─────────────────────────────────────────────
+        socket.on('ilan_silindi', function (event) {
+            incrementCounter('realtime-silindi-sayac');
+
+            showFlash('🗑️ İlan kaldırıldı: ' + escHtml(event.kaynak_id), 'warning');
+
+            window.dispatchEvent(new CustomEvent('emlak:ilan-silindi', { detail: event }));
+        });
+
+        // ── SCRAPER DURUM ─────────────────────────────────────────────
+        socket.on('scraper_durum', function (event) {
+            updateScraperStatus(event.durum);
+
+            const istat = event.istatistikler;
+            if (istat) {
+                setCounterValue('realtime-toplam-sayac', istat.toplam);
+                setCounterValue('realtime-yeni-sayac',   istat.yeni);
+                setCounterValue('realtime-sahte-sayac',  istat.sahte);
+            }
+
+            window.dispatchEvent(new CustomEvent('emlak:scraper-durum', { detail: event }));
+        });
+
+        // Ping testi
+        socket.emit('ping_scraper');
+    }
+
+    // ── Yardımcı: Scraper durum göstergesi ───────────────────────────
+    function updateScraperStatus(durum) {
+        const el = document.getElementById('scraper-durum');
+        if (!el) return;
+        const renkler = {
+            'calisıyor':      'bg-green-500',
+            'duruyor':        'bg-yellow-500',
+            'hata':           'bg-red-500',
+            'bağlantı_yok':   'bg-slate-500',
+        };
+        el.className = el.className.replace(/bg-\w+-\d+/g, '');
+        el.classList.add(renkler[durum] || 'bg-slate-500');
+        const labelEl = document.getElementById('scraper-durum-label');
+        if (labelEl) {
+            const etiketler = {
+                'calisıyor': 'Çalışıyor',
+                'duruyor': 'Duruyor',
+                'hata': 'Hata',
+                'bağlantı_yok': 'Bağlantı Yok',
+            };
+            labelEl.textContent = etiketler[durum] || durum;
+        }
+    }
+
+    // ── Yardımcı: Sayaç artır ─────────────────────────────────────────
+    function incrementCounter(id) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = (parseInt(el.textContent || '0') + 1).toString();
+    }
+
+    function setCounterValue(id, val) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = formatSayi(val);
+    }
+
+    // ── Yardımcı: Kırmızı alarm banner ───────────────────────────────
+    function showAlarmBanner(baslik, altBaslik, detay) {
+        const existing = document.getElementById('alarm-banner');
+        if (existing) existing.remove();
+
+        const banner = document.createElement('div');
+        banner.id = 'alarm-banner';
+        banner.style.cssText = [
+            'position:fixed;top:0;left:0;right:0;z-index:99999',
+            'background:rgba(255,20,60,0.95)',
+            'color:white;padding:12px 16px',
+            'display:flex;align-items:center;gap:12px',
+            'animation:slideDown 0.3s ease',
+        ].join(';');
+        banner.innerHTML =
+            '<span style="font-size:24px;flex-shrink:0">🚨</span>' +
+            '<div style="flex:1;min-width:0">' +
+                '<div style="font-size:14px;font-weight:700">' + escHtml(baslik) + '</div>' +
+                '<div style="font-size:12px;opacity:0.85">' + escHtml(altBaslik) + '</div>' +
+                (detay ? '<div style="font-size:11px;opacity:0.7;margin-top:2px">' + escHtml(detay) + '</div>' : '') +
+            '</div>' +
+            '<button onclick="this.parentElement.remove()" style="padding:4px 10px;background:rgba(255,255,255,0.2);border:none;border-radius:6px;color:white;cursor:pointer;font-size:12px">Kapat</button>';
+
+        const style = document.createElement('style');
+        style.textContent = '@keyframes slideDown{from{transform:translateY(-100%)}to{transform:translateY(0)}}';
+        document.head.appendChild(style);
+        document.body.prepend(banner);
+
+        // 15 saniye sonra otomatik kapat
+        setTimeout(() => banner.remove(), 15000);
+    }
+
+    // ── Yardımcı: String kes ───────────────────────────────────────────
+    function truncateStr(str, max) {
+        if (!str) return '';
+        return str.length > max ? str.slice(0, max - 1) + '…' : str;
+    }
+
+})();
+
 /* ── Sayfa hazır ────────────────────────────────────────────────────── */
 document.addEventListener('DOMContentLoaded', function () {
     // Tüm tabloları sırala

@@ -1,137 +1,310 @@
 <?php
 /**
- * EmlakRadar Pro - VPS Webhook Alıcısı
- * VPS üzerindeki scraper'dan veri alır ve ilanları kaydeder
+ * EmlakRadar Pro — VPS Webhook Alıcısı v2
+ * HMAC-SHA256 imza doğrulama + IP whitelist + 4 olay tipi
  */
 require_once dirname(__DIR__, 2) . '/app/config/app.php';
 header('Content-Type: application/json; charset=utf-8');
 
-// Token doğrulama
-$receivedToken = $_SERVER['HTTP_X_WEBHOOK_TOKEN'] ?? $_GET['token'] ?? '';
-if (!hash_equals(VPS_WEBHOOK_TOKEN, $receivedToken)) {
-    http_response_code(403);
-    echo json_encode(['error' => 'Yetkisiz istek.']);
-    exit;
-}
+// ── IP Whitelist ──────────────────────────────────────────────────────────
+$allowedIps = defined('VPS_ALLOWED_IPS') && VPS_ALLOWED_IPS
+    ? array_map('trim', explode(',', VPS_ALLOWED_IPS))
+    : [];
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    jsonResponse(false, null, 'POST gerekli.', 405);
-}
+if (!empty($allowedIps)) {
+    $clientIp = $_SERVER['HTTP_X_FORWARDED_FOR']
+        ? trim(explode(',', $_SERVER['HTTP_X_FORWARDED_FOR'])[0])
+        : ($_SERVER['REMOTE_ADDR'] ?? '');
 
-$payload = json_decode(file_get_contents('php://input'), true);
-if (!$payload) {
-    jsonResponse(false, null, 'Geçersiz payload.', 400);
-}
-
-$tip     = $payload['tip'] ?? 'ilan'; // 'ilan' | 'emsal' | 'fiyat_guncelle'
-$ofisId  = (int)($payload['ofis_id'] ?? 1);
-$ilanlar = $payload['ilanlar'] ?? [];
-
-if (empty($ilanlar)) {
-    jsonResponse(true, null, 'Veri yok.');
-}
-
-$ilanModel = new Ilan();
-$eklenen   = 0;
-$guncellenen = 0;
-$errors    = [];
-
-foreach ($ilanlar as $i) {
-    try {
-        // Mevcut ilan kontrolü (kaynak URL'ye göre)
-        if (!empty($i['kaynak_url'])) {
-            $pdo = db();
-            $stmt = $pdo->prepare("SELECT id, fiyat, durum FROM ilanlar WHERE kaynak_url = ? LIMIT 1");
-            $stmt->execute([$i['kaynak_url']]);
-            $existing = $stmt->fetch();
-
-            if ($existing) {
-                // Fiyat değişikliği kontrolü
-                if (isset($i['fiyat']) && abs((float)$i['fiyat'] - (float)$existing['fiyat']) > 0.01) {
-                    $ilanModel->addFiyatGecmisi($existing['id'], (float)$i['fiyat']);
-
-                    // Fiyat düşüşü bildirimi
-                    if ((float)$i['fiyat'] < (float)$existing['fiyat']) {
-                        $bildirimModel = new Bildirim();
-                        $bildirimModel->createForOfis($ofisId, 'fiyat_dusus',
-                            'Fiyat Düştü: ' . ($i['baslik'] ?? ''),
-                            'Yeni: ' . formatFiyat((float)$i['fiyat']) . ' (Eski: ' . formatFiyat((float)$existing['fiyat']) . ')',
-                            APP_URL . '/ilan-detay.php?id=' . $existing['id']
-                        );
-                    }
-                }
-
-                // Silinmiş ilan kontrolü
-                if (($i['durum'] ?? '') === 'silindi' && $existing['durum'] !== 'silindi') {
-                    $ilanModel->update($existing['id'], ['durum' => 'silindi', 'silinme_tarihi' => date('Y-m-d H:i:s')]);
-                    $bildirimModel = new Bildirim();
-                    $bildirimModel->createForOfis($ofisId, 'sistem',
-                        'İlan Silindi: ' . ($i['baslik'] ?? ''),
-                        'Bu ilan kaynaktan kaldırıldı.',
-                        APP_URL . '/ilan-detay.php?id=' . $existing['id']
-                    );
-                }
-
-                $guncellenen++;
-                continue;
-            }
-        }
-
-        // Yeni ilan ekle
-        $ilanData = [
-            'ofis_id'         => $ofisId,
-            'baslik'          => $i['baslik'] ?? '',
-            'aciklama'        => $i['aciklama'] ?? null,
-            'fiyat'           => (float)($i['fiyat'] ?? 0),
-            'sehir'           => $i['sehir'] ?? '',
-            'ilce'            => $i['ilce'] ?? null,
-            'mahalle'         => $i['mahalle'] ?? null,
-            'adres'           => $i['adres'] ?? null,
-            'lat'             => $i['lat'] ?? null,
-            'lng'             => $i['lng'] ?? null,
-            'metrekare'       => (int)($i['metrekare'] ?? 0) ?: null,
-            'oda_sayisi'      => $i['oda_sayisi'] ?? null,
-            'kat'             => $i['kat'] ?? null,
-            'bina_yasi'       => (int)($i['bina_yasi'] ?? 0) ?: null,
-            'ilan_sahibi_tel' => $i['ilan_sahibi_tel'] ?? null,
-            'ilan_sahibi_ad'  => $i['ilan_sahibi_ad'] ?? null,
-            'sahibinden_mi'   => (int)($i['sahibinden_mi'] ?? 0),
-            'kaynak_site'     => $i['kaynak_site'] ?? 'manuel',
-            'kaynak_url'      => $i['kaynak_url'] ?? null,
-            'kaynak_id'       => $i['kaynak_id'] ?? null,
-            'ilan_tipi'       => $i['ilan_tipi'] ?? 'satilik',
-            'emlak_tipi'      => $i['emlak_tipi'] ?? 'daire',
-            'fotograflar'     => $i['fotograflar'] ?? [],
-            'durum'           => 'aktif',
-        ];
-
-        if (!$ilanData['baslik'] || !$ilanData['fiyat']) continue;
-
-        $yeniId = $ilanModel->create($ilanData);
-        $eklenen++;
-
-        // Yeni ilan bildirimi
-        $bildirimModel = new Bildirim();
-        $bildirimModel->createForOfis($ofisId, 'yeni_ilan',
-            'Yeni İlan: ' . $ilanData['baslik'],
-            formatFiyat($ilanData['fiyat']) . ' · ' . ($ilanData['ilce'] ?? $ilanData['sehir']),
-            APP_URL . '/ilan-detay.php?id=' . $yeniId
-        );
-
-        // Otomatik eşleştirme (arka planda)
-        $eslestirmeCtrl = new EslestirmeController();
-        $eslestirmeCtrl->otomatikEslestir($yeniId);
-
-    } catch (Exception $e) {
-        $errors[] = $e->getMessage();
-        error_log('Webhook ilan hatası: ' . $e->getMessage());
+    if (!in_array($clientIp, $allowedIps, true)) {
+        http_response_code(403);
+        echo json_encode(['error' => 'IP yetkisiz.']);
+        exit;
     }
 }
 
-logSystem('webhook', "Eklenen: $eklenen, Güncellenen: $guncellenen", null, $ofisId);
+// ── Sadece POST ───────────────────────────────────────────────────────────
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    echo json_encode(['error' => 'POST gerekli.']);
+    exit;
+}
 
-jsonResponse(true, [
-    'eklenen'     => $eklenen,
-    'guncellenen' => $guncellenen,
-    'hatalar'     => $errors,
-]);
+// ── Ham payload ───────────────────────────────────────────────────────────
+$rawBody = file_get_contents('php://input');
+if (!$rawBody) {
+    http_response_code(400);
+    echo json_encode(['error' => 'Boş payload.']);
+    exit;
+}
+
+// ── HMAC-SHA256 İmza Doğrulama ────────────────────────────────────────────
+$receivedSig = $_SERVER['HTTP_X_WEBHOOK_SIGNATURE'] ?? '';
+$secret      = defined('VPS_WEBHOOK_SECRET') ? VPS_WEBHOOK_SECRET : '';
+
+if ($secret) {
+    $expectedSig = 'sha256=' . hash_hmac('sha256', $rawBody, $secret);
+    if (!hash_equals($expectedSig, $receivedSig)) {
+        http_response_code(403);
+        echo json_encode(['error' => 'Geçersiz imza.']);
+        exit;
+    }
+}
+
+// ── Payload ayrıştır ──────────────────────────────────────────────────────
+$payload = json_decode($rawBody, true);
+if (!$payload || !isset($payload['tip'])) {
+    http_response_code(400);
+    echo json_encode(['error' => 'Geçersiz JSON payload.']);
+    exit;
+}
+
+$tip    = $payload['tip'];    // yeni_ilan | guncelleme | silindi | fiyat_degisiklik | sahte_ilan
+$kaynak = $payload['kaynak'] ?? 'unknown';
+$zaman  = $payload['zaman']  ?? date('c');
+
+// ── Modeller ──────────────────────────────────────────────────────────────
+$ilanModel    = new Ilan();
+$bildirimModel = new Bildirim();
+$pdo          = db();
+
+// ── Olay Tipi İşleyicileri ────────────────────────────────────────────────
+switch ($tip) {
+
+    // ── YENİ İLAN: toplu liste ─────────────────────────────────────────
+    case 'yeni_ilan':
+        $ilanlar = $payload['ilanlar'] ?? [];
+        if (empty($ilanlar)) {
+            jsonResponse(true, ['eklenen' => 0], 'Veri yok.');
+        }
+
+        $eklenen  = 0;
+        $atilan   = 0;
+        $errors   = [];
+
+        foreach ($ilanlar as $i) {
+            try {
+                // Mükerrer kontrol
+                if (!empty($i['kaynak_url'])) {
+                    $stmt = $pdo->prepare("SELECT id FROM ilanlar WHERE kaynak_url = ? LIMIT 1");
+                    $stmt->execute([$i['kaynak_url']]);
+                    if ($stmt->fetch()) { $atilan++; continue; }
+                }
+                if (!empty($i['kaynak_id'])) {
+                    $stmt = $pdo->prepare("SELECT id FROM ilanlar WHERE kaynak_id = ? AND kaynak_site = ? LIMIT 1");
+                    $stmt->execute([$i['kaynak_id'], $i['kaynak_site'] ?? '']);
+                    if ($stmt->fetch()) { $atilan++; continue; }
+                }
+
+                $ilanData = mapIlanData($i);
+                if (!$ilanData['baslik'] || !$ilanData['fiyat']) { $atilan++; continue; }
+
+                $yeniId = $ilanModel->create($ilanData);
+                $eklenen++;
+
+                // Bildirim
+                $bildirimModel->createForOfis(
+                    $ilanData['ofis_id'],
+                    'yeni_ilan',
+                    'Yeni İlan: ' . mb_substr($ilanData['baslik'], 0, 60),
+                    formatFiyat($ilanData['fiyat']) . ' · ' . ($ilanData['ilce'] ?? $ilanData['sehir']),
+                    APP_URL . '/ilan-detay.php?id=' . $yeniId
+                );
+
+                // Otomatik eşleştirme
+                $eslestirmeCtrl = new EslestirmeController();
+                $eslestirmeCtrl->otomatikEslestir($yeniId);
+
+                // Kırmızı alarm: sahte ilan tespit
+                $sahteSkor = (int)($i['analiz']['sahte_skor'] ?? 0);
+                if ($sahteSkor >= 50) {
+                    $bildirimModel->createForOfis(
+                        $ilanData['ofis_id'],
+                        'kirmizi_alarm',
+                        '🚨 Sahte İlan Şüphesi: ' . mb_substr($ilanData['baslik'], 0, 50),
+                        "Sahte skor: {$sahteSkor}/100 · " . implode(', ', array_slice($i['analiz']['sahte_sebepler'] ?? [], 0, 2)),
+                        APP_URL . '/ilan-detay.php?id=' . $yeniId
+                    );
+                }
+
+            } catch (Exception $e) {
+                $errors[] = $e->getMessage();
+                error_log('Webhook yeni_ilan hatası: ' . $e->getMessage());
+            }
+        }
+
+        logSystem('webhook', "yeni_ilan: eklenen={$eklenen}, atilan={$atilan}", null, 1);
+        jsonResponse(true, ['eklenen' => $eklenen, 'atilan' => $atilan, 'hatalar' => $errors]);
+        break;
+
+    // ── GÜNCELLEME: tek ilan ───────────────────────────────────────────
+    case 'guncelleme':
+        $i = $payload['ilan'] ?? null;
+        if (!$i || empty($i['kaynak_url'])) {
+            jsonResponse(false, null, 'Eksik ilan verisi.', 400);
+        }
+
+        $stmt = $pdo->prepare("SELECT id, fiyat, durum FROM ilanlar WHERE kaynak_url = ? OR (kaynak_id = ? AND kaynak_site = ?) LIMIT 1");
+        $stmt->execute([$i['kaynak_url'] ?? '', $i['kaynak_id'] ?? '', $i['kaynak_site'] ?? '']);
+        $existing = $stmt->fetch();
+
+        if (!$existing) {
+            // Mevcut değilse ekle
+            $ilanData = mapIlanData($i);
+            if ($ilanData['baslik'] && $ilanData['fiyat']) {
+                $ilanModel->create($ilanData);
+            }
+            jsonResponse(true, ['durum' => 'eklendi']);
+        }
+
+        // Alanları güncelle
+        $updateData = mapIlanData($i);
+        unset($updateData['ofis_id']); // ofis_id değiştirme
+        $ilanModel->update($existing['id'], $updateData);
+
+        logSystem('webhook', "guncelleme: id={$existing['id']}", null, 1);
+        jsonResponse(true, ['durum' => 'guncellendi', 'id' => $existing['id']]);
+        break;
+
+    // ── SİLİNDİ: ilan kaldırıldı ──────────────────────────────────────
+    case 'silindi':
+        $i = $payload['ilan'] ?? null;
+        if (!$i) {
+            jsonResponse(false, null, 'Eksik ilan verisi.', 400);
+        }
+
+        $stmt = $pdo->prepare("SELECT id, baslik, ofis_id FROM ilanlar WHERE kaynak_url = ? OR (kaynak_id = ? AND kaynak_site = ?) LIMIT 1");
+        $stmt->execute([$i['kaynak_url'] ?? '', $i['kaynak_id'] ?? '', $i['kaynak_site'] ?? '']);
+        $existing = $stmt->fetch();
+
+        if ($existing) {
+            $ilanModel->update($existing['id'], [
+                'durum'           => 'silindi',
+                'silinme_tarihi'  => date('Y-m-d H:i:s'),
+            ]);
+
+            $bildirimModel->createForOfis(
+                $existing['ofis_id'],
+                'sistem',
+                'İlan Kaldırıldı: ' . mb_substr($existing['baslik'], 0, 60),
+                'Bu ilan kaynak platformdan kaldırılmıştır.',
+                APP_URL . '/ilan-detay.php?id=' . $existing['id']
+            );
+
+            logSystem('webhook', "silindi: id={$existing['id']}", null, $existing['ofis_id']);
+        }
+
+        jsonResponse(true, ['durum' => 'islendi']);
+        break;
+
+    // ── FİYAT DEĞİŞİKLİĞİ ─────────────────────────────────────────────
+    case 'fiyat_degisiklik':
+        $i = $payload['ilan'] ?? null;
+        if (!$i) {
+            jsonResponse(false, null, 'Eksik ilan verisi.', 400);
+        }
+
+        $eskiFiyat  = (float)($i['meta']['eski_fiyat'] ?? 0);
+        $yeniFiyat  = (float)($i['fiyat'] ?? 0);
+        $degisimPct = (float)($i['meta']['fiyat_degisim_yuzdesi'] ?? 0);
+
+        $stmt = $pdo->prepare("SELECT id, ofis_id, baslik, fiyat FROM ilanlar WHERE kaynak_url = ? OR (kaynak_id = ? AND kaynak_site = ?) LIMIT 1");
+        $stmt->execute([$i['kaynak_url'] ?? '', $i['kaynak_id'] ?? '', $i['kaynak_site'] ?? '']);
+        $existing = $stmt->fetch();
+
+        if ($existing) {
+            // Fiyat geçmişine ekle
+            $ilanModel->addFiyatGecmisi($existing['id'], $yeniFiyat);
+
+            // Fiyatı güncelle
+            $ilanModel->update($existing['id'], ['fiyat' => $yeniFiyat]);
+
+            // Bildirim (fiyat düşüşü için özel ikon)
+            $ikon    = $degisimPct < 0 ? 'fiyat_dusus' : 'sistem';
+            $etiket  = $degisimPct < 0 ? '🔻 Fiyat Düştü' : '📈 Fiyat Arttı';
+            $bildirimModel->createForOfis(
+                $existing['ofis_id'],
+                $ikon,
+                $etiket . ': ' . mb_substr($existing['baslik'], 0, 50),
+                sprintf('%s → %s (%+.1f%%)', formatFiyat($eskiFiyat), formatFiyat($yeniFiyat), $degisimPct),
+                APP_URL . '/ilan-detay.php?id=' . $existing['id']
+            );
+
+            logSystem('webhook', "fiyat_degisiklik: id={$existing['id']}, {$eskiFiyat}→{$yeniFiyat}", null, $existing['ofis_id']);
+        }
+
+        jsonResponse(true, ['durum' => 'islendi']);
+        break;
+
+    // ── SAHTE İLAN UYARISI ────────────────────────────────────────────
+    case 'sahte_ilan':
+        $i = $payload['ilan'] ?? null;
+        if (!$i) {
+            jsonResponse(false, null, 'Eksik ilan verisi.', 400);
+        }
+
+        $sahteSkor  = (int)($i['meta']['sahte_skor'] ?? 0);
+        $sebepler   = $i['meta']['sahte_sebepler'] ?? [];
+
+        $stmt = $pdo->prepare("SELECT id, ofis_id, baslik FROM ilanlar WHERE kaynak_url = ? OR (kaynak_id = ? AND kaynak_site = ?) LIMIT 1");
+        $stmt->execute([$i['kaynak_url'] ?? '', $i['kaynak_id'] ?? '', $i['kaynak_site'] ?? '']);
+        $existing = $stmt->fetch();
+
+        if ($existing) {
+            // sahte_skor kaydet
+            $ilanModel->update($existing['id'], ['sahte_skor' => $sahteSkor, 'sahte_sonuc' => 'muhtemelen_sahte']);
+
+            $bildirimModel->createForOfis(
+                $existing['ofis_id'],
+                'kirmizi_alarm',
+                '🚨 Sahte İlan Tespiti: ' . mb_substr($existing['baslik'], 0, 50),
+                "Skor: {$sahteSkor}/100 · " . implode(', ', array_slice($sebepler, 0, 3)),
+                APP_URL . '/ilan-detay.php?id=' . $existing['id']
+            );
+
+            logSystem('webhook', "sahte_ilan: id={$existing['id']}, skor={$sahteSkor}", null, $existing['ofis_id']);
+        }
+
+        jsonResponse(true, ['durum' => 'islendi']);
+        break;
+
+    default:
+        http_response_code(400);
+        echo json_encode(['error' => "Bilinmeyen olay tipi: {$tip}"]);
+        exit;
+}
+
+// ── Yardımcı: Scraper verisini DB formatına çevir ─────────────────────────
+function mapIlanData(array $i): array {
+    return [
+        'ofis_id'        => 1, // Varsayılan ofis (çok ofisli için ayarlanabilir)
+        'baslik'         => mb_substr($i['baslik'] ?? '', 0, 255),
+        'aciklama'       => $i['aciklama'] ?? null,
+        'fiyat'          => (float)($i['fiyat'] ?? 0),
+        'sehir'          => $i['konum']['il'] ?? '',
+        'ilce'           => $i['konum']['ilce'] ?? null,
+        'mahalle'        => $i['konum']['mahalle'] ?? null,
+        'adres'          => $i['konum']['adres'] ?? null,
+        'lat'            => isset($i['konum']['lat']) ? (float)$i['konum']['lat'] : null,
+        'lng'            => isset($i['konum']['lng']) ? (float)$i['konum']['lng'] : null,
+        'metrekare'      => (int)($i['ozellikler']['metrekare'] ?? 0) ?: null,
+        'oda_sayisi'     => $i['ozellikler']['oda_sayisi'] ?? null,
+        'kat'            => $i['ozellikler']['kat'] ?? null,
+        'bina_yasi'      => (int)($i['ozellikler']['bina_yasi'] ?? 0) ?: null,
+        'isitma'         => $i['ozellikler']['isitma'] ?? null,
+        'banyo_sayisi'   => isset($i['ozellikler']['banyo_sayisi']) ? (int)$i['ozellikler']['banyo_sayisi'] : null,
+        'ilan_sahibi_tel'=> $i['satici']['telefon'] ?? null,
+        'ilan_sahibi_ad' => $i['satici']['ad'] ?? null,
+        'sahibinden_mi'  => ($i['kaynak_site'] ?? '') === 'sahibinden' ? 1 : 0,
+        'kaynak_site'    => $i['kaynak_site'] ?? 'scraper',
+        'kaynak_url'     => $i['kaynak_url'] ?? null,
+        'kaynak_id'      => $i['kaynak_id'] ?? null,
+        'ilan_tipi'      => $i['tip'] ?? 'satilik',
+        'emlak_tipi'     => $i['kategori'] ?? 'daire',
+        'fotograflar'    => $i['fotograflar'] ?? [],
+        'sahte_skor'     => (int)($i['analiz']['sahte_skor'] ?? 0),
+        'sahte_sonuc'    => $i['analiz']['sahte_sonuc'] ?? 'gercek',
+        'mukerrer_grup_id' => $i['analiz']['mukerrer_grup_id'] ?? null,
+        'durum'          => 'aktif',
+    ];
+}
