@@ -90,4 +90,5 @@ spl_autoload_register(function (string $class): void {
 });
 
 // Config dosyaları yükle
+require_once APP_DIR . '/helpers/Functions.php';
 require_once APP_DIR . '/config/database.php';
