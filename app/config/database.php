@@ -8,9 +8,9 @@ class Database {
     private static ?PDO $instance = null;
 
     private static string $host     = 'localhost';
-    private static string $dbname   = 'emlakradar';
-    private static string $username = 'root';
-    private static string $password = '';
+    private static string $dbname   = 'hetagayrimenkul_db';
+    private static string $username = 'hetagayrimenkul_user';
+    private static string $password = 'Hetaemrecan99@';
     private static string $charset  = 'utf8mb4';
 
     private function __construct() {}

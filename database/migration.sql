@@ -1,13 +1,15 @@
 -- ============================================================
 -- EmlakRadar Pro Veritabanı Şeması
 -- Version: 1.0.0
+-- Database: hetagayrimenkul_db
+--
+-- KURULUM:
+-- cPanel > phpMyAdmin > hetagayrimenkul_db seçin > SQL sekmesi > yapıştırın > Git
 -- ============================================================
 
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
-
-CREATE DATABASE IF NOT EXISTS emlakradar CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE emlakradar;
+SET sql_mode = 'NO_ENGINE_SUBSTITUTION';
 
 -- Ofisler
 CREATE TABLE IF NOT EXISTS ofisler (
@@ -29,7 +31,7 @@ CREATE TABLE IF NOT EXISTS kullanicilar (
     id INT AUTO_INCREMENT PRIMARY KEY,
     ofis_id INT NOT NULL,
     ad_soyad VARCHAR(100) NOT NULL,
-    email VARCHAR(150) NOT NULL UNIQUE,
+    email VARCHAR(150) NOT NULL,
     sifre VARCHAR(255) NOT NULL,
     telefon VARCHAR(20),
     rol ENUM('admin','broker','danisman') NOT NULL DEFAULT 'danisman',
@@ -40,6 +42,7 @@ CREATE TABLE IF NOT EXISTS kullanicilar (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (ofis_id) REFERENCES ofisler(id) ON DELETE CASCADE,
+    UNIQUE KEY uk_email (email),
     INDEX idx_email (email),
     INDEX idx_rol (rol),
     INDEX idx_ofis (ofis_id)
@@ -52,7 +55,7 @@ CREATE TABLE IF NOT EXISTS ilanlar (
     danisman_id INT,
     baslik VARCHAR(255) NOT NULL,
     aciklama TEXT,
-    fiyat DECIMAL(15,2) NOT NULL,
+    fiyat DECIMAL(15,2) NOT NULL DEFAULT 0,
     fiyat_gecmisi JSON,
     sehir VARCHAR(50) NOT NULL,
     ilce VARCHAR(50),
@@ -65,7 +68,7 @@ CREATE TABLE IF NOT EXISTS ilanlar (
     kat VARCHAR(20),
     bina_yasi INT,
     isitma_tipi VARCHAR(50),
-    esya_durumu ENUM('bosalt','esyali','yarı esyali'),
+    esya_durumu ENUM('bos','esyali','yari_esyali') DEFAULT 'bos',
     fotograflar JSON,
     kaynak_site ENUM('sahibinden','hepsiemlak','emlakjet','manuel') DEFAULT 'manuel',
     kaynak_url VARCHAR(500),
@@ -74,6 +77,7 @@ CREATE TABLE IF NOT EXISTS ilanlar (
     ilan_sahibi_ad VARCHAR(100),
     sahibinden_mi TINYINT(1) DEFAULT 0,
     sahte_skoru TINYINT DEFAULT 0,
+    sahte_sonuc VARCHAR(30) DEFAULT 'gercek',
     durum ENUM('aktif','pasif','silindi','satildi','kiralandi') DEFAULT 'aktif',
     ilan_tipi ENUM('satilik','kiralik') DEFAULT 'satilik',
     emlak_tipi ENUM('daire','villa','mustakil','arsa','dukkan','ofis','diger') DEFAULT 'daire',
@@ -88,12 +92,12 @@ CREATE TABLE IF NOT EXISTS ilanlar (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (ofis_id) REFERENCES ofisler(id) ON DELETE SET NULL,
     FOREIGN KEY (danisman_id) REFERENCES kullanicilar(id) ON DELETE SET NULL,
-    INDEX idx_konum (sehir, ilce, mahalle),
+    INDEX idx_konum (sehir, ilce),
     INDEX idx_fiyat (fiyat),
     INDEX idx_durum (durum),
     INDEX idx_kaynak (kaynak_url(191)),
     INDEX idx_tip (ilan_tipi, emlak_tipi),
-    FULLTEXT idx_arama (baslik, aciklama, adres)
+    FULLTEXT idx_arama (baslik, adres)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Müşteriler
@@ -141,7 +145,7 @@ CREATE TABLE IF NOT EXISTS gorevler (
     saat TIME,
     tamamlandi TINYINT(1) DEFAULT 0,
     sonuc TEXT,
-    sonuc_tipi ENUM('basarili','basarisiz','ertelendi','ulasılamadı'),
+    sonuc_tipi ENUM('basarili','basarisiz','ertelendi','ulasilamadi'),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (danisman_id) REFERENCES kullanicilar(id) ON DELETE CASCADE,
@@ -277,19 +281,24 @@ CREATE TABLE IF NOT EXISTS sistem_loglari (
 
 SET FOREIGN_KEY_CHECKS = 1;
 
+-- ============================================================
+-- BAŞLANGIÇ VERİLERİ
+-- ============================================================
+
 -- Varsayılan ofis
 INSERT INTO ofisler (ad, sehir, ilce, adres, telefon) VALUES
-('Özgün Digital Emlak', 'Kocaeli', 'İzmit', 'İzmit Merkez', '0532 000 0000');
+('HETA Gayrimenkul', 'Kocaeli', 'İzmit', 'İzmit Merkez', '0532 000 0000');
 
--- Varsayılan admin kullanıcı (şifre: Admin123!)
+-- Varsayılan admin kullanıcı
+-- Giriş: admin@hetagayrimenkul.com / Admin123!
 INSERT INTO kullanicilar (ofis_id, ad_soyad, email, sifre, telefon, rol) VALUES
-(1, 'Buğrahan Ö.', 'admin@emlakradar.com', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', '0532 000 0000', 'admin');
+(1, 'Admin', 'admin@hetagayrimenkul.com', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', '0532 000 0000', 'admin');
 
 -- Örnek ilanlar
 INSERT INTO ilanlar (ofis_id, danisman_id, baslik, aciklama, fiyat, sehir, ilce, mahalle, metrekare, oda_sayisi, kat, bina_yasi, ilan_tipi, emlak_tipi, durum, kaynak_site) VALUES
 (1, 1, 'İzmit Merkez 3+1 Satılık Daire', 'Geniş balkonlu, ferah, merkezi konumda 3+1 daire', 2850000.00, 'Kocaeli', 'İzmit', 'Orhan', 120, '3+1', '4/8', 10, 'satilik', 'daire', 'aktif', 'manuel'),
 (1, 1, 'Gebze Sanayi Yakını Kiralık Dükkan', 'Ana cadde üzeri, dükkana uygun zemin kat', 18000.00, 'Kocaeli', 'Gebze', 'Cumhuriyet', 85, NULL, '0/5', 15, 'kiralik', 'dukkan', 'aktif', 'manuel'),
-(1, 1, 'Çayırova Villa Arsa Fırsatı', 'İmarlı, köşe parsel, geniş arsa', 4200000.00, 'Kocaeli', 'Çayırova', 'Akse', NULL, NULL, NULL, NULL, 'satilik', 'arsa', 'aktif', 'manuel');
+(1, 1, 'Çayırova Köşe Parsel Arsa Fırsatı', 'İmarlı, köşe parsel, geniş arsa', 4200000.00, 'Kocaeli', 'Çayırova', 'Akse', NULL, NULL, NULL, NULL, 'satilik', 'arsa', 'aktif', 'manuel');
 
 -- Örnek müşteriler
 INSERT INTO musteriler (ofis_id, danisman_id, ad_soyad, telefon, email, tip, butce_min, butce_max, durum) VALUES
