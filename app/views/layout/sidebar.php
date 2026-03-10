@@ -59,14 +59,16 @@ $menuItems = [
             <span class="text-base w-5 text-center"><?= $item['icon'] ?></span>
             <span class="flex-1 font-medium"><?= e($item['label']) ?></span>
             <?php if (!empty($item['badge'])): ?>
-            <span class="text-xs px-1.5 py-0.5 rounded-full font-bold"
-                  style="<?= match($item['badge_color'] ?? 'gray') {
-                      'cyan'   => 'background: rgba(0,212,255,0.15); color: #00d4ff;',
-                      'amber'  => 'background: rgba(255,170,0,0.15); color: #ffaa00;',
-                      'purple' => 'background: rgba(139,92,246,0.15); color: #8b5cf6;',
-                      'red'    => 'background: rgba(255,51,102,0.15); color: #ff3366;',
-                      default  => 'background: rgba(255,255,255,0.1); color: #e8ecf4;',
-                  } ?>">
+            <?php
+            $bcMap = [
+                'cyan'   => 'background: rgba(0,212,255,0.15); color: #00d4ff;',
+                'amber'  => 'background: rgba(255,170,0,0.15); color: #ffaa00;',
+                'purple' => 'background: rgba(139,92,246,0.15); color: #8b5cf6;',
+                'red'    => 'background: rgba(255,51,102,0.15); color: #ff3366;',
+            ];
+            $bcStyle = $bcMap[$item['badge_color'] ?? ''] ?? 'background: rgba(255,255,255,0.1); color: #e8ecf4;';
+            ?>
+            <span class="text-xs px-1.5 py-0.5 rounded-full font-bold" style="<?= $bcStyle ?>">
                 <?= e($item['badge']) ?>
             </span>
             <?php endif; ?>

@@ -165,12 +165,12 @@ class AI {
         if (empty($this->apiKey)) return $this->senaryoVarsayilan($gorevTipi);
         if (!$this->rateLimitKontrol()) { $this->logApiCall('konusma_senaryosu', false, 'Rate limit'); return $this->senaryoVarsayilan($gorevTipi); }
 
-        $tipAciklama = match($gorevTipi) {
+        $tipAciklamaMap = [
             'arama'    => 'İlk kez aranacak müşteri/satıcı',
             'gosterim' => 'Ev gösterimi sonrası takip',
             'takip'    => 'Daha önce görüşülmüş, takip araması',
-            default    => 'Genel emlak danışmanlığı araması',
-        };
+        ];
+        $tipAciklama = $tipAciklamaMap[$gorevTipi] ?? 'Genel emlak danışmanlığı araması';
 
         $prompt = "Görev tipi: $gorevTipi ($tipAciklama)\n"
             . "Müşteri: " . ($musteriData['ad_soyad'] ?? 'Bilinmiyor') . " (Tip: " . ($musteriData['tip'] ?? '-') . ")\n"

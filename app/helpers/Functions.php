@@ -6,7 +6,7 @@
 /**
  * XSS temizliği ile değer çıkar
  */
-function e(mixed $value): string {
+function e($value): string {
     return htmlspecialchars((string)($value ?? ''), ENT_QUOTES | ENT_HTML5, 'UTF-8');
 }
 
@@ -71,7 +71,7 @@ function csrfField(): string {
 /**
  * JSON API yanıtı gönder
  */
-function jsonResponse(bool $success, mixed $data = null, string $message = '', int $code = 200): void {
+function jsonResponse(bool $success, $data = null, string $message = '', int $code = 200): void {
     http_response_code($code);
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode([
@@ -149,14 +149,14 @@ function logSystem(string $islem, string $detay = '', ?int $kullaniciId = null, 
 /**
  * POST verisini temizle
  */
-function postVal(string $key, mixed $default = ''): string {
+function postVal(string $key, $default = ''): string {
     return trim($_POST[$key] ?? $default);
 }
 
 /**
  * GET verisini temizle
  */
-function getVal(string $key, mixed $default = ''): string {
+function getVal(string $key, $default = ''): string {
     return trim($_GET[$key] ?? $default);
 }
 
@@ -207,39 +207,39 @@ function badge(string $text, string $color = 'blue'): string {
  * İlan durum badgei
  */
 function ilanDurumBadge(string $durum): string {
-    return match($durum) {
-        'aktif'    => badge('Aktif', 'green'),
-        'pasif'    => badge('Pasif', 'gray'),
-        'silindi'  => badge('Silindi', 'red'),
-        'satildi'  => badge('Satıldı', 'purple'),
-        'kiralandi'=> badge('Kiralandı', 'blue'),
-        default    => badge($durum, 'gray'),
-    };
+    $map = [
+        'aktif'     => badge('Aktif', 'green'),
+        'pasif'     => badge('Pasif', 'gray'),
+        'silindi'   => badge('Silindi', 'red'),
+        'satildi'   => badge('Satıldı', 'purple'),
+        'kiralandi' => badge('Kiralandı', 'blue'),
+    ];
+    return $map[$durum] ?? badge($durum, 'gray');
 }
 
 /**
  * Müşteri tip badgei
  */
 function musteriTipBadge(string $tip): string {
-    return match($tip) {
-        'alici'    => badge('Alıcı', 'cyan'),
-        'satici'   => badge('Satıcı', 'green'),
-        'yatirmci' => badge('Yatırımcı', 'purple'),
-        'kiralayan'=> badge('Kiralayan', 'amber'),
-        default    => badge($tip, 'gray'),
-    };
+    $map = [
+        'alici'     => badge('Alıcı', 'cyan'),
+        'satici'    => badge('Satıcı', 'green'),
+        'yatirmci'  => badge('Yatırımcı', 'purple'),
+        'kiralayan' => badge('Kiralayan', 'amber'),
+    ];
+    return $map[$tip] ?? badge($tip, 'gray');
 }
 
 /**
  * Öncelik rengi
  */
 function oncelikRengi(string $oncelik): string {
-    return match($oncelik) {
+    $map = [
         'yuksek' => 'text-red-400',
         'orta'   => 'text-amber-400',
         'dusuk'  => 'text-green-400',
-        default  => 'text-gray-400',
-    };
+    ];
+    return $map[$oncelik] ?? 'text-gray-400';
 }
 
 /**

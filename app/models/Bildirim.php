@@ -62,26 +62,26 @@ class Bildirim {
     }
 
     public function tipIkon(string $tip): string {
-        return match($tip) {
+        $map = [
             'kirmizi_alarm' => '🚨',
             'eslestirme'    => '🔗',
             'gorev'         => '✅',
             'sistem'        => '⚙️',
             'fiyat_dusus'   => '📉',
             'yeni_ilan'     => '🏠',
-            default         => '🔔',
-        };
+        ];
+        return $map[$tip] ?? '🔔';
     }
 
     public function tipRenk(string $tip): string {
-        return match($tip) {
+        $map = [
             'kirmizi_alarm' => 'red',
             'eslestirme'    => 'purple',
             'gorev'         => 'green',
             'sistem'        => 'gray',
             'fiyat_dusus'   => 'amber',
             'yeni_ilan'     => 'cyan',
-            default         => 'blue',
-        };
+        ];
+        return $map[$tip] ?? 'blue';
     }
 }

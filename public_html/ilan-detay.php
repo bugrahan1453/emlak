@@ -291,9 +291,8 @@ require_once APP_DIR . '/views/layout/header.php';
                     <div class="flex justify-between">
                         <span style="color: #7a8599;">Fırsat Seviyesi</span>
                         <?php
-                            $fRenk = match($aiDeg['firsat_seviyesi'] ?? '') {
-                                'yuksek' => '#00ff88', 'orta' => '#ffaa00', default => '#ff3366'
-                            };
+                            $fRenkMap = ['yuksek' => '#00ff88', 'orta' => '#ffaa00'];
+                            $fRenk = $fRenkMap[$aiDeg['firsat_seviyesi'] ?? ''] ?? '#ff3366';
                         ?>
                         <span class="font-semibold" style="color:<?= $fRenk ?>;"><?= e(strtoupper($aiDeg['firsat_seviyesi'] ?? '-')) ?></span>
                     </div>

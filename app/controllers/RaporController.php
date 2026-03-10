@@ -66,11 +66,8 @@ class RaporController {
         $donem       = getVal('donem') ?: 'ay';
         $danismanlar = $perfModel->getSkorTablosu($user['ofis_id'], $donem);
 
-        $donemLabel  = match($donem) {
-            'gun'   => 'Bugün',
-            'hafta' => 'Bu Hafta',
-            default => 'Bu Ay',
-        };
+        $donemLabelMap = ['gun' => 'Bugün', 'hafta' => 'Bu Hafta'];
+        $donemLabel    = $donemLabelMap[$donem] ?? 'Bu Ay';
 
         $html = $this->pdf->performansRaporu($danismanlar, $donemLabel);
 

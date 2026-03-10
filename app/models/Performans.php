@@ -11,11 +11,11 @@ class Performans {
     }
 
     public function getSkorTablosu(int $ofisId, string $donem = 'ay'): array {
-        $dateFilter = match($donem) {
+        $dateFilterMap = [
             'gun'   => 'AND p.tarih = CURDATE()',
             'hafta' => 'AND p.tarih >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)',
-            default => 'AND p.tarih >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)',
-        };
+        ];
+        $dateFilter = $dateFilterMap[$donem] ?? 'AND p.tarih >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)';
 
         $stmt = $this->db->prepare("
             SELECT k.id, k.ad_soyad, k.avatar,

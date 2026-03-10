@@ -69,7 +69,7 @@ require_once APP_DIR . '/views/layout/header.php';
                 musteriTipBadge($m['tip']),
                 e($m['telefon']),
                 $m['butce_max'] ? '<span class="font-mono text-xs" style="color:#00d4ff;">Max ' . number_format($m['butce_max'], 0, ',', '.') . ' ₺</span>' : '-',
-                badge(match($m['durum']) { 'aktif'=>'Aktif','pasif'=>'Pasif','anlasildi'=>'Anlaşıldı','vazgecti'=>'Vazgeçti', default=>$m['durum'] }, match($m['durum']) { 'aktif'=>'green','pasif'=>'gray','anlasildi'=>'purple','vazgecti'=>'red', default=>'gray' }),
+                badge(['aktif'=>'Aktif','pasif'=>'Pasif','anlasildi'=>'Anlaşıldı','vazgecti'=>'Vazgeçti'][$m['durum']] ?? $m['durum'], ['aktif'=>'green','pasif'=>'gray','anlasildi'=>'purple','vazgecti'=>'red'][$m['durum']] ?? 'gray'),
                 $m['son_iletisim'] ? zamanFarki($m['son_iletisim']) : '<span style="color:#7a8599;">-</span>',
                 '<div class="flex gap-1"><a href="' . APP_URL . '/musteri-detay.php?id=' . (int)$m['id'] . '" class="px-2 py-1 text-xs rounded-lg" style="background:rgba(0,212,255,0.1);color:#00d4ff;">Detay</a><a href="' . APP_URL . '/musteri-ekle.php?id=' . (int)$m['id'] . '" class="px-2 py-1 text-xs rounded-lg" style="background:rgba(255,255,255,0.04);color:#7a8599;">Düzenle</a></div>',
             ];

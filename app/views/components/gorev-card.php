@@ -4,19 +4,11 @@
  * Değişkenler: $gorev (array)
  * AI senaryo modal + sesli not butonu dahil
  */
-$oncelikRenk = match($gorev['oncelik'] ?? 'orta') {
-    'yuksek' => '#ff3366',
-    'dusuk'  => '#00ff88',
-    default  => '#ffaa00',
-};
-$tipIkon = match($gorev['tip'] ?? 'diger') {
-    'arama'   => '📞',
-    'gosterim'=> '🏠',
-    'takip'   => '🔄',
-    'portfoy' => '📋',
-    'randevu' => '📅',
-    default   => '✅',
-};
+$oncelikRenkMap = ['yuksek' => '#ff3366', 'dusuk' => '#00ff88'];
+$oncelikRenk    = $oncelikRenkMap[$gorev['oncelik'] ?? 'orta'] ?? '#ffaa00';
+
+$tipIkonMap = ['arama' => '📞', 'gosterim' => '🏠', 'takip' => '🔄', 'portfoy' => '📋', 'randevu' => '📅'];
+$tipIkon    = $tipIkonMap[$gorev['tip'] ?? 'diger'] ?? '✅';
 $gorevId = (int)($gorev['id'] ?? 0);
 $tamamlandi = $gorev['tamamlandi'] ?? ($gorev['durum'] === 'tamamlandi' ? 1 : 0);
 ?>

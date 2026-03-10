@@ -38,14 +38,14 @@ require_once APP_DIR . '/views/layout/header.php';
             $skorRenk = $es['skor'] >= 80 ? '#00ff88' : ($es['skor'] >= 60 ? '#ffaa00' : '#ff3366');
             $foto = null;
             if (!empty($es['fotograflar'])) { $f = json_decode($es['fotograflar'],true); $foto = $f[0] ?? null; }
-            $durumRenk = match($es['durum']) {
-                'bekliyor'  => 'rgba(255,170,0,0.15)|#ffaa00',
-                'bildirildi'=> 'rgba(0,212,255,0.15)|#00d4ff',
-                'ilgilendi' => 'rgba(0,255,136,0.15)|#00ff88',
-                'reddetti'  => 'rgba(255,51,102,0.15)|#ff3366',
-                'gorustu'   => 'rgba(139,92,246,0.15)|#8b5cf6',
-                default     => 'rgba(255,255,255,0.05)|#7a8599',
-            };
+            $durumRenkMap = [
+                'bekliyor'   => 'rgba(255,170,0,0.15)|#ffaa00',
+                'bildirildi' => 'rgba(0,212,255,0.15)|#00d4ff',
+                'ilgilendi'  => 'rgba(0,255,136,0.15)|#00ff88',
+                'reddetti'   => 'rgba(255,51,102,0.15)|#ff3366',
+                'gorustu'    => 'rgba(139,92,246,0.15)|#8b5cf6',
+            ];
+            $durumRenk = $durumRenkMap[$es['durum']] ?? 'rgba(255,255,255,0.05)|#7a8599';
             [$drBg, $drText] = explode('|', $durumRenk);
         ?>
         <div class="rounded-2xl overflow-hidden"

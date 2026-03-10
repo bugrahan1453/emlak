@@ -120,12 +120,12 @@ class WhatsApp {
      * ŞABLON: Rapor Gönderimi
      * ───────────────────────────────────────────────────────────────── */
     public function raporMesaji(array $musteri, string $raporTipi, string $raporUrl): string {
-        $tipAd = match($raporTipi) {
+        $tipAdMap = [
             'gerceklik_tokadi' => 'Gerçeklik Tokadı',
             'roi'              => 'ROI / Yatırım Getiri Analizi',
             'portfoy'          => 'Portföy Özet',
-            default            => ucfirst($raporTipi),
-        };
+        ];
+        $tipAd = $tipAdMap[$raporTipi] ?? ucfirst($raporTipi);
         return sprintf(
             "Merhaba %s 📊\n\n" .
             "Sizin için *%s Raporu* hazırlandı.\n\n" .

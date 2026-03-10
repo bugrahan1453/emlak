@@ -47,7 +47,7 @@ class Ofis {
         return json_decode($row['ayarlar'], true) ?? [];
     }
 
-    public function setAyar(int $ofisId, string $key, mixed $value): bool {
+    public function setAyar(int $ofisId, string $key, $value): bool {
         $ayarlar = $this->getAyarlar($ofisId);
         $ayarlar[$key] = $value;
         return $this->update($ofisId, ['ayarlar' => $ayarlar]);

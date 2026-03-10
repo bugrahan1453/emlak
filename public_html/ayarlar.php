@@ -210,7 +210,7 @@ require_once APP_DIR . '/views/layout/header.php';
                         <tr class="border-b hover:bg-white/2" style="border-color: rgba(255,255,255,0.04);">
                             <td class="px-4 py-3" style="color:#e8ecf4;"><?= e($k['ad_soyad']) ?></td>
                             <td class="px-4 py-3 text-xs" style="color:#7a8599;"><?= e($k['email']) ?></td>
-                            <td class="px-4 py-3"><?= badge(ucfirst($k['rol']), match($k['rol']){'admin'=>'red','broker'=>'amber',default=>'cyan'}) ?></td>
+                            <td class="px-4 py-3"><?= badge(ucfirst($k['rol']), ['admin'=>'red','broker'=>'amber'][$k['rol']] ?? 'cyan') ?></td>
                             <td class="px-4 py-3"><?= badge($k['durum']==='aktif'?'Aktif':'Pasif',$k['durum']==='aktif'?'green':'gray') ?></td>
                             <td class="px-4 py-3 text-xs" style="color:#7a8599;"><?= $k['son_giris'] ? zamanFarki($k['son_giris']) : '-' ?></td>
                             <td class="px-4 py-3">
