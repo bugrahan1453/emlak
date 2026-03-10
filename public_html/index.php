@@ -118,7 +118,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <label class="block text-xs font-medium mb-1.5" style="color: #7a8599;">E-posta Adresi</label>
                         <input type="email" name="email" required
                                value="<?= htmlspecialchars($_POST['email'] ?? '', ENT_QUOTES) ?>"
-                               placeholder="admin@emlakradar.com"
+                               placeholder="admin@hetagayrimenkul.com"
                                class="input-field w-full px-4 py-3 rounded-xl text-sm">
                     </div>
 
@@ -142,7 +142,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 <div class="mt-6 pt-4 border-t text-center" style="border-color: rgba(255,255,255,0.06);">
                     <p class="text-xs" style="color: #7a8599;">
-                        Demo: <span style="color: #00d4ff;">admin@emlakradar.com</span> / <span style="color: #00d4ff;">password</span>
+                        Demo: <span style="color: #00d4ff;">admin@hetagayrimenkul.com</span> / <span style="color: #00d4ff;">Admin123!</span>
                     </p>
                 </div>
             </div>

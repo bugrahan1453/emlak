@@ -292,7 +292,7 @@ INSERT INTO ofisler (ad, sehir, ilce, adres, telefon) VALUES
 -- Varsayılan admin kullanıcı
 -- Giriş: admin@hetagayrimenkul.com / Admin123!
 INSERT INTO kullanicilar (ofis_id, ad_soyad, email, sifre, telefon, rol) VALUES
-(1, 'Admin', 'admin@hetagayrimenkul.com', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', '0532 000 0000', 'admin');
+(1, 'Admin', 'admin@hetagayrimenkul.com', '$2y$12$JXsanjsv2vQUeHTQZlBBe.kUdwJP4ljqwYy16VeZ9WOZYV.EHn0aK', '0532 000 0000', 'admin');
 
 -- Örnek ilanlar
 INSERT INTO ilanlar (ofis_id, danisman_id, baslik, aciklama, fiyat, sehir, ilce, mahalle, metrekare, oda_sayisi, kat, bina_yasi, ilan_tipi, emlak_tipi, durum, kaynak_site) VALUES
