@@ -1,9 +1,8 @@
 /**
  * EmlakRadar Scraper — BullMQ Kuyruk Yöneticisi
  */
-import { Queue, Worker, QueueEvents, Job } from 'bullmq';
-import { Redis } from 'ioredis';
-import { ScrapeJobData, ScraperStats } from '../types';
+import { Queue, Worker, QueueEvents, Job, ConnectionOptions } from 'bullmq';
+import { ScrapeJobData } from '../types';
 import { createLogger } from '../utils/Logger';
 import { config } from '../config';
 
@@ -11,31 +10,21 @@ const logger = createLogger('QueueManager');
 
 const QUEUE_NAME = 'emlak-scrape';
 
-let connection: Redis | null = null;
 let scrapeQueue: Queue<ScrapeJobData> | null = null;
 let queueEvents: QueueEvents | null = null;
 
 /**
- * Redis bağlantısı oluştur
+ * Redis bağlantı seçenekleri
  */
-function getRedisConnection(): Redis {
-  if (connection) return connection;
-
-  connection = new Redis({
+function getConnectionOptions(): ConnectionOptions {
+  return {
     host: config.redis.host,
     port: config.redis.port,
     password: config.redis.password || undefined,
-    db: config.redis.db,
-    maxRetriesPerRequest: null, // BullMQ için gerekli
+    maxRetriesPerRequest: null as unknown as undefined, // BullMQ için gerekli
     enableReadyCheck: false,
     lazyConnect: true,
-  });
-
-  connection.on('connect', () => logger.info('Redis bağlantısı kuruldu'));
-  connection.on('error', (err) => logger.error('Redis bağlantı hatası', { err: err.message }));
-  connection.on('reconnecting', () => logger.warn('Redis yeniden bağlanıyor...'));
-
-  return connection;
+  };
 }
 
 /**
@@ -45,7 +34,7 @@ export function getQueue(): Queue<ScrapeJobData> {
   if (scrapeQueue) return scrapeQueue;
 
   scrapeQueue = new Queue<ScrapeJobData>(QUEUE_NAME, {
-    connection: getRedisConnection(),
+    connection: getConnectionOptions(),
     defaultJobOptions: {
       attempts: 3,
       backoff: { type: 'exponential', delay: 5000 },
@@ -63,15 +52,15 @@ export function getQueue(): Queue<ScrapeJobData> {
  */
 export async function addScrapeJob(data: ScrapeJobData, opts?: { priority?: number; delay?: number }): Promise<Job<ScrapeJobData>> {
   const queue = getQueue();
-  const jobId = `${data.kaynak}_${data.sayfa ?? 1}_${Date.now()}`;
+  const jobId = `${data.site}_${data.sayfa ?? 1}_${Date.now()}`;
 
-  const job = await queue.add(`scrape:${data.kaynak}`, data, {
+  const job = await queue.add(`scrape:${data.site}`, data, {
     jobId,
     priority: opts?.priority ?? 10,
     delay: opts?.delay ?? 0,
   });
 
-  logger.debug(`İş eklendi: ${jobId}`, { kaynak: data.kaynak, sayfa: data.sayfa });
+  logger.debug(`İş eklendi: ${jobId}`, { site: data.site, sayfa: data.sayfa });
   return job;
 }
 
@@ -80,9 +69,9 @@ export async function addScrapeJob(data: ScrapeJobData, opts?: { priority?: numb
  */
 export async function addBulkScrapeJobs(kaynaklar: Array<'sahibinden' | 'hepsiemlak' | 'emlakjet'>): Promise<void> {
   const queue = getQueue();
-  const jobs = kaynaklar.map(kaynak => ({
-    name: `scrape:${kaynak}`,
-    data: { kaynak, sayfa: 1 } as ScrapeJobData,
+  const jobs = kaynaklar.map(site => ({
+    name: `scrape:${site}`,
+    data: { site, sehir: 'istanbul', tip: 'satilik' as const, sayfa: 1 } as ScrapeJobData,
     opts: { priority: 10 },
   }));
 
@@ -93,7 +82,7 @@ export async function addBulkScrapeJobs(kaynaklar: Array<'sahibinden' | 'hepsiem
 /**
  * Kuyruk istatistiklerini döndürür
  */
-export async function getQueueStats(): Promise<ScraperStats['queue']> {
+export async function getQueueStats(): Promise<{ waiting: number; active: number; completed: number; failed: number }> {
   const queue = getQueue();
   const [waiting, active, completed, failed] = await Promise.all([
     queue.getWaitingCount(),
@@ -112,18 +101,18 @@ export function startQueueEvents(): QueueEvents {
   if (queueEvents) return queueEvents;
 
   queueEvents = new QueueEvents(QUEUE_NAME, {
-    connection: getRedisConnection(),
+    connection: getConnectionOptions(),
   });
 
-  queueEvents.on('completed', ({ jobId }) => {
+  queueEvents.on('completed', ({ jobId }: { jobId: string }) => {
     logger.debug(`İş tamamlandı: ${jobId}`);
   });
 
-  queueEvents.on('failed', ({ jobId, failedReason }) => {
+  queueEvents.on('failed', ({ jobId, failedReason }: { jobId: string; failedReason: string }) => {
     logger.error(`İş başarısız: ${jobId} — ${failedReason}`);
   });
 
-  queueEvents.on('stalled', ({ jobId }) => {
+  queueEvents.on('stalled', ({ jobId }: { jobId: string }) => {
     logger.warn(`İş takıldı: ${jobId}`);
   });
 
@@ -136,9 +125,7 @@ export function startQueueEvents(): QueueEvents {
 export async function closeQueue(): Promise<void> {
   await queueEvents?.close();
   await scrapeQueue?.close();
-  await connection?.quit();
   queueEvents = null;
   scrapeQueue = null;
-  connection = null;
   logger.info('Kuyruk kapatıldı');
 }

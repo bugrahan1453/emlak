@@ -62,9 +62,8 @@ async function bootstrap(): Promise<void> {
   // 6. Durum yayınla
   emitScraperDurum({
     durum: 'calisıyor',
-    aktif_kaynaklar: ['sahibinden', 'hepsiemlak', 'emlakjet'],
-    son_calistirma: new Date().toISOString(),
-    istatistikler: { toplam: 0, yeni: 0, guncelleme: 0, sahte: 0, mukerrer: 0, silindi: 0, hatalar: 0 },
+    aktif_gorev: 'sahibinden,hepsiemlak,emlakjet',
+    son_guncelleme: new Date().toISOString(),
   });
 
   logger.info('EmlakRadar Scraper başarıyla başlatıldı', {
@@ -78,10 +77,8 @@ async function shutdown(signal: string): Promise<void> {
   logger.info(`Kapatma sinyali alındı: ${signal}`);
 
   emitScraperDurum({
-    durum: 'duruyor',
-    aktif_kaynaklar: [],
-    son_calistirma: new Date().toISOString(),
-    istatistikler: { toplam: 0, yeni: 0, guncelleme: 0, sahte: 0, mukerrer: 0, silindi: 0, hatalar: 0 },
+    durum: 'durdu',
+    son_guncelleme: new Date().toISOString(),
   });
 
   stopScheduler();

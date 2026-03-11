@@ -65,7 +65,7 @@ export async function checkIlan(tracked: TrackedIlan): Promise<GhostCheckResult>
     if (response.status === 404 || response.status === 410) {
       tracked.silindi = true;
       logger.info(`İlan silindi (${response.status}): ${tracked.kaynak_id}`);
-      return { kaynak_id: tracked.kaynak_id, silindi: true, status_kodu: response.status, kontrol_suresi_ms: Date.now() - baslangic };
+      return { kaynak_url: tracked.kaynak_url, kaynak_id: tracked.kaynak_id, silindi: true, http_kodu: response.status, kontrol_zamani: new Date().toISOString() };
     }
 
     // 3xx başka bir URL'e yönlendirme → muhtemelen silindi veya değişti
@@ -75,19 +75,19 @@ export async function checkIlan(tracked: TrackedIlan): Promise<GhostCheckResult>
       if (isRedirectToHome(location, tracked.kaynak_site)) {
         tracked.silindi = true;
         logger.info(`İlan silindi (redirect → anasayfa): ${tracked.kaynak_id}`);
-        return { kaynak_id: tracked.kaynak_id, silindi: true, status_kodu: response.status, kontrol_suresi_ms: Date.now() - baslangic };
+        return { kaynak_url: tracked.kaynak_url, kaynak_id: tracked.kaynak_id, silindi: true, http_kodu: response.status, kontrol_zamani: new Date().toISOString() };
       }
     }
 
     // 200 = aktif
-    return { kaynak_id: tracked.kaynak_id, silindi: false, status_kodu: response.status, kontrol_suresi_ms: Date.now() - baslangic };
+    return { kaynak_url: tracked.kaynak_url, kaynak_id: tracked.kaynak_id, silindi: false, http_kodu: response.status, kontrol_zamani: new Date().toISOString() };
 
   } catch (err: unknown) {
     tracked.son_kontrol = Date.now();
     const errMsg = err instanceof Error ? err.message : String(err);
     // Bağlantı hatası → silindiğinden emin değiliz
     logger.debug(`HEAD isteği hatası: ${tracked.kaynak_id} — ${errMsg}`);
-    return { kaynak_id: tracked.kaynak_id, silindi: false, status_kodu: 0, kontrol_suresi_ms: Date.now() - baslangic };
+    return { kaynak_url: tracked.kaynak_url, kaynak_id: tracked.kaynak_id, silindi: false, http_kodu: 0, kontrol_zamani: new Date().toISOString() };
   }
 }
 

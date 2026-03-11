@@ -10,7 +10,8 @@ import { config } from '../config';
 // Stealth plugin'i kaydet
 puppeteer.use(StealthPlugin());
 
-export const LAUNCH_OPTIONS: LaunchOptions = {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const LAUNCH_OPTIONS: LaunchOptions & Record<string, any> = {
   executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
   headless: true,
   args: [

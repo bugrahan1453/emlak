@@ -110,39 +110,19 @@ export class SahibindenScraper extends BaseScraper {
             kaynak_id: id,
             baslik,
             aciklama: '',
-            fiyat,
-            fiyat_birim: 'TRY',
+            fiyat: fiyat ?? 0,
+            fiyat_birimi: 'TL',
             tip: tip as 'satilik' | 'kiralik',
             kategori: 'daire',
-            konum: {
-              il: lokasyonParcalar[0] || '',
-              ilce: lokasyonParcalar[1] || '',
-              mahalle: lokasyonParcalar[2] || '',
-              adres: lokasyonParcalar.join(', '),
-              lat: null,
-              lng: null,
-            },
-            ozellikler: {
-              metrekare,
-              oda_sayisi: odaText || null,
-              bina_yasi: null,
-              kat: null,
-              isitma: null,
-              banyo_sayisi: null,
-              balkon: null,
-              asansor: null,
-              otopark: null,
-              esyali: null,
-            },
-            satici: { ad: '', telefon: '', eposta: '', tip: 'bireysel' },
-            fotograflar: fotografUrl ? [{ url: fotografUrl, sira: 0 }] : [],
-            analiz: { sahte_skor: 0, sahte_sonuc: 'gercek' },
-            meta: {
-              ilan_tarihi: tarih,
-              guncelleme_tarihi: tarih,
-              goruntulenme: null,
-              favori: null,
-            },
+            sehir: lokasyonParcalar[0] || '',
+            ilce: lokasyonParcalar[1] || '',
+            mahalle: lokasyonParcalar[2] || '',
+            adres: lokasyonParcalar.join(', '),
+            metrekare: metrekare ?? undefined,
+            oda_sayisi: odaText || undefined,
+            fotograflar: fotografUrl ? [fotografUrl] : [],
+            ilan_tarihi: tarih || undefined,
+            taranan_at: new Date().toISOString(),
           };
 
           ilanlar.push(ilan);
@@ -169,12 +149,12 @@ export class SahibindenScraper extends BaseScraper {
       const saticiAdEl = document.querySelector('.username, .classifiedUserName');
       const saticiAd = saticiAdEl?.textContent?.trim() || '';
 
-      const fotograflar: Array<{ url: string; sira: number }> = [];
+      const fotograflar: string[] = [];
       const fotografEls = document.querySelectorAll('.classifiedDetailMainPhotos img, .swiper-slide img') as NodeListOf<HTMLImageElement>;
-      fotografEls.forEach((img, i) => {
+      fotografEls.forEach((img) => {
         const url = img.getAttribute('data-src') || img.src;
         if (url && !url.includes('no-image')) {
-          fotograflar.push({ url, sira: i });
+          fotograflar.push(url);
         }
       });
 
@@ -188,20 +168,18 @@ export class SahibindenScraper extends BaseScraper {
 
       return {
         aciklama,
-        satici: { ad: saticiAd, telefon: '', eposta: '', tip: 'bireysel' },
+        satici_ad: saticiAd,
+        satici_tip: 'bireysel' as const,
         fotograflar: fotograflar.length > 0 ? fotograflar : undefined,
-        ozellikler: {
-          metrekare: parseFloat(ozellikMap['Metrekare (Brüt)'] || ozellikMap['m²'] || '0') || null,
-          oda_sayisi: ozellikMap['Oda Sayısı'] || null,
-          bina_yasi: ozellikMap['Bina Yaşı'] || null,
-          kat: ozellikMap['Bulunduğu Kat'] || null,
-          isitma: ozellikMap['Isıtma'] || null,
-          banyo_sayisi: parseInt(ozellikMap['Banyo Sayısı'] || '0') || null,
-          balkon: ozellikMap['Balkon']?.includes('Var') ?? null,
-          asansor: ozellikMap['Asansör']?.includes('Var') ?? null,
-          otopark: ozellikMap['Otopark']?.includes('Var') ?? null,
-          esyali: ozellikMap['Eşyalı']?.includes('Evet') ?? null,
-        },
+        metrekare: parseFloat(ozellikMap['Metrekare (Brüt)'] || ozellikMap['m²'] || '0') || undefined,
+        oda_sayisi: ozellikMap['Oda Sayısı'] || undefined,
+        bina_yasi: parseInt(ozellikMap['Bina Yaşı'] || '0') || undefined,
+        kat: ozellikMap['Bulunduğu Kat'] || undefined,
+        isitma: ozellikMap['Isıtma'] || undefined,
+        balkon: ozellikMap['Balkon'] ? ozellikMap['Balkon'].includes('Var') : undefined,
+        asansor: ozellikMap['Asansör'] ? ozellikMap['Asansör'].includes('Var') : undefined,
+        otopark: ozellikMap['Otopark'] ? ozellikMap['Otopark'].includes('Var') : undefined,
+        esya: ozellikMap['Eşyalı'] ? ozellikMap['Eşyalı'].includes('Evet') : undefined,
       };
     }) as Promise<Partial<IlanVeri>>;
   }

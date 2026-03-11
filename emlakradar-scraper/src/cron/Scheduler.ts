@@ -1,6 +1,7 @@
 /**
  * EmlakRadar Scraper — node-cron Zamanlayıcı
  */
+// @ts-ignore — @types/node-cron paketi mevcut değil
 import cron from 'node-cron';
 import { addBulkScrapeJobs } from '../queue/QueueManager';
 import { createLogger } from '../utils/Logger';
@@ -8,7 +9,8 @@ import { config } from '../config';
 
 const logger = createLogger('Scheduler');
 
-let cronTask: cron.ScheduledTask | null = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let cronTask: any = null;
 
 /**
  * Scrape interval'den cron ifadesi üretir

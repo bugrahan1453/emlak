@@ -19,15 +19,14 @@ export abstract class BaseScraper {
   protected readonly logger = createLogger(this.constructor.name);
   protected browser: Browser | null = null;
   protected stats: ScraperStats = {
-    toplam: 0,
-    yeni: 0,
-    guncelleme: 0,
-    sahte: 0,
-    mukerrer: 0,
-    silindi: 0,
-    hatalar: 0,
-    queue: { waiting: 0, active: 0, completed: 0, failed: 0 },
-    son_calistirma: new Date().toISOString(),
+    baslangic: new Date(),
+    taranan_sayfa: 0,
+    bulunan_ilan: 0,
+    yeni_ilan: 0,
+    guncellenen: 0,
+    hata_sayisi: 0,
+    sahte_tespit: 0,
+    mukerrer_tespit: 0,
   };
 
   // Daha önce görülmüş ilanları takip etmek için bellek içi depo
@@ -107,23 +106,24 @@ export abstract class BaseScraper {
     const tumMevcut = Array.from(this.seenIlanlar.values());
 
     for (const ilan of ilanlar) {
-      this.stats.toplam++;
+      this.stats.bulunan_ilan++;
 
       // Sahte ilan analizi
       const fakeResult = analyzeFake(ilan, tumMevcut);
-      ilan.analiz = { ...ilan.analiz, sahte_skor: fakeResult.skor, sahte_sonuc: fakeResult.sonuc };
+      ilan.sahtelik_skoru = fakeResult.skor;
+      ilan.muhtemelen_sahte = fakeResult.muhtemelen_sahte;
 
-      if (fakeResult.sahte) {
-        this.stats.sahte++;
-        await sendSahteIlan(ilan, fakeResult.skor, fakeResult.sebepler).catch(() => {});
-        emitKirmiziAlarm(ilan, fakeResult.skor, fakeResult.sebepler);
+      if (fakeResult.muhtemelen_sahte) {
+        this.stats.sahte_tespit++;
+        await sendSahteIlan(ilan, fakeResult.skor, fakeResult.nedenler).catch(() => {});
+        emitKirmiziAlarm(ilan, fakeResult.skor, fakeResult.nedenler);
       }
 
       // Mükerrer ilan analizi
       const dupResult = findDuplicate(ilan, tumMevcut);
       if (dupResult.mukerrer) {
-        this.stats.mukerrer++;
-        ilan.analiz = { ...ilan.analiz, mukerrer_grup_id: dupResult.grupId ?? undefined };
+        this.stats.mukerrer_tespit++;
+        ilan.mukerrer_grup_id = dupResult.grup_id ?? undefined;
       }
 
       // Daha önce görüldü mü?
@@ -132,12 +132,12 @@ export abstract class BaseScraper {
         // Fiyat değişikliği kontrolü
         if (mevcut.fiyat && ilan.fiyat && mevcut.fiyat !== ilan.fiyat) {
           const degisim = fiyatDegisimYuzdesi(mevcut.fiyat, ilan.fiyat);
-          this.stats.guncelleme++;
+          this.stats.guncellenen++;
           await sendFiyatDegisiklik(ilan, mevcut.fiyat, ilan.fiyat, degisim).catch(() => {});
           emitFiyatDegisiklik(ilan, mevcut.fiyat, ilan.fiyat, degisim);
         }
       } else {
-        this.stats.yeni++;
+        this.stats.yeni_ilan++;
         yeniIlanlar.push(ilan);
         trackIlan(ilan);
         emitYeniIlan(ilan);
@@ -151,7 +151,7 @@ export abstract class BaseScraper {
     if (yeniIlanlar.length > 0) {
       await sendYeniIlanlar(yeniIlanlar).catch((err) => {
         this.logger.error('Webhook gönderme hatası', { err: err.message });
-        this.stats.hatalar++;
+        this.stats.hata_sayisi++;
       });
     }
   }
@@ -165,15 +165,16 @@ export abstract class BaseScraper {
    * Tüm sayfaları tara
    */
   async scrapeAll(): Promise<ScraperStats> {
-    this.stats.son_calistirma = new Date().toISOString();
+    this.stats.baslangic = new Date();
 
     try {
       await this.init();
       await this.scrape();
     } catch (err) {
       this.logger.error(`${this.kaynakAdi} scraping hatası`, { err });
-      this.stats.hatalar++;
+      this.stats.hata_sayisi++;
     } finally {
+      this.stats.bitis = new Date();
       await this.destroy();
     }
 

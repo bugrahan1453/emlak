@@ -77,10 +77,7 @@ export function stopSocketServer(): Promise<void> {
  */
 export function emitYeniIlan(ilan: IlanVeri): void {
   if (!io) return;
-  const event: SocketEvents['yeni_ilan'] = {
-    ilan,
-    zaman: new Date().toISOString(),
-  };
+  const event: SocketEvents['yeni_ilan'] = ilan;
   io.emit('yeni_ilan', event);
   logger.debug(`[WS] yeni_ilan: ${ilan.kaynak_id}`);
 }
@@ -88,13 +85,11 @@ export function emitYeniIlan(ilan: IlanVeri): void {
 /**
  * Kırmızı alarm (sahte ilan) eventı yayınlar
  */
-export function emitKirmiziAlarm(ilan: IlanVeri, skor: number, sebepler: string[]): void {
+export function emitKirmiziAlarm(ilan: IlanVeri, skor: number, nedenler: string[]): void {
   if (!io) return;
   const event: SocketEvents['kirmizi_alarm'] = {
     ilan,
-    skor,
-    sebepler,
-    zaman: new Date().toISOString(),
+    neden: nedenler.join('; '),
   };
   io.emit('kirmizi_alarm', event);
   logger.warn(`[WS] kirmizi_alarm: ${ilan.kaynak_id} (skor: ${skor})`);
@@ -111,11 +106,11 @@ export function emitFiyatDegisiklik(
 ): void {
   if (!io) return;
   const event: SocketEvents['fiyat_degisiklik'] = {
-    ilan,
+    kaynak_url: ilan.kaynak_url,
     eski_fiyat: eskiFiyat,
     yeni_fiyat: yeniFiyat,
-    degisim_yuzdesi: degisimYuzdesi,
-    zaman: new Date().toISOString(),
+    degisim_pct: degisimYuzdesi,
+    ilan,
   };
   io.emit('fiyat_degisiklik', event);
   logger.info(`[WS] fiyat_degisiklik: ${ilan.kaynak_id} — %${degisimYuzdesi}`);
@@ -124,12 +119,12 @@ export function emitFiyatDegisiklik(
 /**
  * İlan silindi eventı yayınlar
  */
-export function emitIlanSilindi(kaynak_id: string, kaynak_url: string): void {
+export function emitIlanSilindi(kaynak_id: string, kaynak_url: string, kaynak_site: string = 'sahibinden'): void {
   if (!io) return;
   const event: SocketEvents['ilan_silindi'] = {
     kaynak_id,
     kaynak_url,
-    zaman: new Date().toISOString(),
+    kaynak_site,
   };
   io.emit('ilan_silindi', event);
   logger.info(`[WS] ilan_silindi: ${kaynak_id}`);

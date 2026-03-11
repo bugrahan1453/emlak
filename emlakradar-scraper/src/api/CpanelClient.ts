@@ -56,7 +56,7 @@ export async function sendGuncelleme(ilan: IlanVeri): Promise<void> {
 export async function sendSilindi(kaynak_id: string, kaynak_url: string, kaynak_site: string): Promise<void> {
   const payload: WebhookPayload = {
     tip: 'silindi',
-    ilan: { kaynak_id, kaynak_url, kaynak_site } as IlanVeri,
+    ilan: { kaynak_id, kaynak_url },
     zaman: new Date().toISOString(),
     kaynak: kaynak_site,
   };
@@ -74,7 +74,7 @@ export async function sendFiyatDegisiklik(
 ): Promise<void> {
   const payload: WebhookPayload = {
     tip: 'fiyat_degisiklik',
-    ilan: { ...ilan, meta: { ...ilan.meta, eski_fiyat: eskiFiyat, fiyat_degisim_yuzdesi: degisimYuzdesi } },
+    ilan,
     zaman: new Date().toISOString(),
     kaynak: ilan.kaynak_site,
   };
@@ -88,11 +88,12 @@ export async function sendFiyatDegisiklik(
 export async function sendSahteIlan(ilan: IlanVeri, skor: number, sebepler: string[]): Promise<void> {
   const payload: WebhookPayload = {
     tip: 'sahte_ilan',
-    ilan: { ...ilan, meta: { ...ilan.meta, sahte_skor: skor, sahte_sebepler: sebepler } },
+    ilan,
     zaman: new Date().toISOString(),
     kaynak: ilan.kaynak_site,
   };
   await sendWebhook(payload);
+  logger.info(`Sahte ilan bildirildi: ${ilan.kaynak_id} (skor: ${skor}, nedenler: ${sebepler.length})`);
 }
 
 /**

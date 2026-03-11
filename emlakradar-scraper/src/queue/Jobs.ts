@@ -1,8 +1,7 @@
 /**
  * EmlakRadar Scraper — BullMQ İş İşleyicileri
  */
-import { Worker, Job } from 'bullmq';
-import { Redis } from 'ioredis';
+import { Worker, Job, ConnectionOptions } from 'bullmq';
 import { ScrapeJobData } from '../types';
 import { createLogger } from '../utils/Logger';
 import { config } from '../config';
@@ -23,31 +22,30 @@ type ScraperRegistry = {
 export function startWorker(scrapers: ScraperRegistry): Worker<ScrapeJobData> {
   if (worker) return worker;
 
-  const connection = new Redis({
+  const connection: ConnectionOptions = {
     host: config.redis.host,
     port: config.redis.port,
     password: config.redis.password || undefined,
-    db: config.redis.db,
-    maxRetriesPerRequest: null,
+    maxRetriesPerRequest: null as unknown as undefined,
     enableReadyCheck: false,
-  });
+  };
 
   worker = new Worker<ScrapeJobData>(
     'emlak-scrape',
     async (job: Job<ScrapeJobData>) => {
-      const { kaynak, sayfa, filtreler } = job.data;
+      const { site, sayfa } = job.data;
 
-      logger.info(`İş başladı: ${job.id} — ${kaynak} sayfa:${sayfa ?? 1}`);
+      logger.info(`İş başladı: ${job.id} — ${site} sayfa:${sayfa ?? 1}`);
       await job.updateProgress(0);
 
       try {
-        if (!scrapers[kaynak]) {
-          throw new Error(`Bilinmeyen kaynak: ${kaynak}`);
+        if (!scrapers[site]) {
+          throw new Error(`Bilinmeyen kaynak: ${site}`);
         }
 
-        await scrapers[kaynak]();
+        await scrapers[site]();
         await job.updateProgress(100);
-        logger.info(`İş tamamlandı: ${job.id} — ${kaynak}`);
+        logger.info(`İş tamamlandı: ${job.id} — ${site}`);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         logger.error(`İş hatası: ${job.id} — ${msg}`);
@@ -64,11 +62,11 @@ export function startWorker(scrapers: ScraperRegistry): Worker<ScrapeJobData> {
     }
   );
 
-  worker.on('error', (err) => {
+  worker.on('error', (err: Error) => {
     logger.error('Worker hatası', { err: err.message });
   });
 
-  worker.on('stalled', (jobId) => {
+  worker.on('stalled', (jobId: string) => {
     logger.warn(`Worker takıldı: ${jobId}`);
   });
 
