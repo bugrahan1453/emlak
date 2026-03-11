@@ -15,116 +15,148 @@
 
 | Bileşen | Minimum | Önerilen |
 |---------|---------|----------|
-| cPanel sunucu | PHP 8.1 | PHP 8.2+ |
+| cPanel sunucu | PHP 7.4 | PHP 8.1+ |
 | MySQL/MariaDB | 5.7 | 8.0+ |
 | VPS RAM | 2 GB | 4 GB |
 | VPS CPU | 1 vCPU | 2 vCPU |
 | VPS Disk | 20 GB | 40 GB |
 | Docker | 24.x | 25.x+ |
 | Docker Compose | 2.x | 2.24+ |
-| Node.js (lokal build için) | 18.x | 20.x |
 
 ---
 
 ## cPanel Kurulumu
+
+### Proje Klasör Yapısı
+
+Sunucudaki dizin yapısı şu şekilde olmalıdır:
+
+```
+/home/kullanici/
+├── public_html/          ← Web root (domain buraya işaret eder)
+│   ├── index.php
+│   ├── dashboard.php
+│   ├── ilanlar.php
+│   ├── ... (diğer PHP sayfaları)
+│   ├── api/              ← API endpoint'leri
+│   ├── assets/           ← CSS/JS/resim (symlink veya kopya)
+│   ├── uploads/          ← Yüklenen dosyalar
+│   │   ├── fotograflar/
+│   │   ├── raporlar/
+│   │   └── sesli-notlar/
+│   ├── manifest.json
+│   ├── sw.js
+│   ├── offline.html
+│   └── .htaccess
+├── app/                  ← PHP uygulama çekirdeği (web'den erişilemez)
+│   ├── config/
+│   │   ├── app.php       ← Ana konfigürasyon
+│   │   └── database.php  ← Veritabanı bağlantısı
+│   ├── models/
+│   ├── controllers/
+│   ├── helpers/
+│   ├── middleware/
+│   └── views/
+├── assets/               ← Kaynak CSS/JS/resimler
+├── cron/                 ← Cron job PHP dosyaları (web'den erişilemez)
+├── database/
+│   └── migration.sql     ← Veritabanı şeması
+└── logs/                 ← PHP hata logları (oluşturulmalı)
+```
+
+> **Önemli:** `public_html/` dışındaki klasörler (app/, cron/, database/, logs/)
+> web tarayıcısından erişilemez. `.htaccess` bu korumayı otomatik sağlar.
+
+---
 
 ### 1. Veritabanı Oluşturma
 
 cPanel → **MySQL Databases** bölümüne gidin:
 
 ```
-Veritabanı adı : emlakradar_db
-Kullanıcı adı  : emlakradar_user
+Veritabanı adı : hetagayrimenkul_db
+Kullanıcı adı  : hetagayrimenkul_user
 Parola         : [güçlü rastgele parola]
 Ayrıcalıklar   : ALL PRIVILEGES
 ```
 
+---
+
 ### 2. Şema Yükleme
 
-cPanel → **phpMyAdmin** → `emlakradar_db` → **SQL** sekmesi:
+cPanel → **phpMyAdmin** → veritabanını seçin → **İçe Aktar** sekmesi:
 
-```sql
-SOURCE /home/kullanici/emlakradar_db.sql;
-```
+`database/migration.sql` dosyasını yükleyin.
 
-> Alternatif: cPanel → **MySQL Databases** → **Import** ile `database/schema.sql` dosyasını yükleyin.
+---
 
 ### 3. Dosyaları Yükleme
 
-cPanel → **File Manager** → `public_html` dizinine gidin ve tüm proje dosyalarını yükleyin:
+Tüm proje dosyalarını cPanel → **File Manager** veya FTP/SFTP ile yükleyin.
+Hedef dizin: `/home/kullanici/` (public_html'in üstü)
 
-```
-public_html/
-├── index.php
-├── manifest.json
-├── sw.js
-├── offline.html
-├── api/
-│   ├── ilanlar.php
-│   ├── webhook.php
-│   ├── bildirimler.php
-│   └── ...
-app/
-├── config/
-│   └── app.php
-├── models/
-├── controllers/
-└── helpers/
-assets/
-├── css/
-├── js/
-└── img/
-```
+---
 
 ### 4. Konfigürasyon
 
-`app/config/app.php` dosyasını düzenleyin:
+**`app/config/database.php`** dosyasını düzenleyin:
 
 ```php
-// Veritabanı
-define('DB_HOST', 'localhost');
-define('DB_NAME', 'emlakradar_db');
-define('DB_USER', 'emlakradar_user');
-define('DB_PASS', 'your_secure_password');
-
-// Uygulama URL
-define('APP_URL', 'https://yourdomain.com');
-
-// VPS Webhook güvenlik
-define('VPS_WEBHOOK_SECRET', 'cok_gizli_anahtar_min_32_karakter');
-define('VPS_ALLOWED_IPS', '1.2.3.4,5.6.7.8');  // VPS IP adresleri (virgülle)
-
-// Socket.io (VPS)
-define('VPS_SOCKET_URL', 'https://vps.yourdomain.com:3001');
-
-// VAPID anahtarları (Push bildirimleri için)
-define('VAPID_PUBLIC_KEY', 'your_vapid_public_key');
-define('VAPID_PRIVATE_KEY', 'your_vapid_private_key');
-
-// Email (isteğe bağlı)
-define('SMTP_HOST', 'mail.yourdomain.com');
-define('SMTP_USER', 'noreply@yourdomain.com');
-define('SMTP_PASS', 'email_password');
+private static string $host     = 'localhost';
+private static string $dbname   = 'hetagayrimenkul_db';
+private static string $username = 'hetagayrimenkul_user';
+private static string $password = 'guclu-parolaniz';
+private static string $charset  = 'utf8mb4';
 ```
+
+**`app/config/app.php`** dosyasında ortam değişkenlerini ayarlayın.
+cPanel → **Softaculous** veya **MultiPHP INI Editor** üzerinden ya da `.htaccess` / `php.ini` ile:
+
+```
+APP_URL     = https://hetagayrimenkul.com
+APP_ENV     = production
+JWT_SECRET  = en-az-32-karakter-guclu-bir-anahtar
+```
+
+Alternatif olarak doğrudan `app/config/app.php` içinde varsayılan değerleri değiştirin:
+
+```php
+define('APP_URL', 'https://hetagayrimenkul.com');
+define('APP_ENV', 'production');
+define('JWT_SECRET', 'en-az-32-karakter-guclu-bir-anahtar');
+```
+
+---
 
 ### 5. İzinleri Ayarlama
 
-cPanel → **File Manager** veya SSH ile:
+cPanel → **File Manager** ile sağ tıklayarak veya SSH üzerinden:
 
 ```bash
-# Yazılabilir dizinler
+# Klasör izinleri
 chmod 755 public_html/
 chmod 755 app/
-chmod 644 app/config/app.php
-chmod 755 storage/
-chmod 755 storage/logs/
-chmod 755 storage/cache/
-chmod 755 storage/pdf/
+chmod 755 assets/
+chmod 755 cron/
 
-# Log dosyaları
-touch storage/logs/app.log
-chmod 666 storage/logs/app.log
+# Konfigürasyon dosyası (sadece okunabilir)
+chmod 644 app/config/app.php
+chmod 644 app/config/database.php
+
+# Upload klasörleri (PHP yazabilmeli)
+chmod 755 public_html/uploads/
+chmod 755 public_html/uploads/fotograflar/
+chmod 755 public_html/uploads/raporlar/
+chmod 755 public_html/uploads/sesli-notlar/
+
+# Log klasörü — oluşturup yazılabilir yap
+mkdir -p logs
+chmod 755 logs
+touch logs/error.log
+chmod 666 logs/error.log
 ```
+
+---
 
 ### 6. SSL Sertifikası
 
@@ -132,33 +164,28 @@ cPanel → **SSL/TLS** → **Let's Encrypt SSL** → Domain seçin → **Install
 
 > HTTPS zorunludur. Service Worker ve Push bildirimleri yalnızca HTTPS üzerinde çalışır.
 
-### 7. Meta Etiketleri (Socket.io)
+---
 
-Ana layout dosyanıza (`app/views/layout.php` veya benzeri) ekleyin:
+### 7. CRON Görevleri
 
-```html
-<head>
-    <!-- VPS Socket.io URL -->
-    <meta name="vps-socket-url" content="<?= VPS_SOCKET_URL ?>">
-    <!-- VAPID Public Key -->
-    <meta name="vapid-public-key" content="<?= VAPID_PUBLIC_KEY ?>">
-</head>
-```
-
-### 8. CRON Görevleri
-
-cPanel → **Cron Jobs** → aşağıdaki görevleri ekleyin:
+cPanel → **Cron Jobs** bölümüne gidin ve şu görevleri ekleyin:
 
 ```
 # Her saat başı performans istatistikleri
-0 * * * * php /home/kullanici/cron/performans-hesapla.php >> /dev/null 2>&1
+0 * * * * /usr/bin/php /home/kullanici/cron/performans-hesapla.php >> /dev/null 2>&1
 
-# Her gece yarısı ghost fallback kontrol
-0 0 * * * php /home/kullanici/cron/ghost-fallback.php >> /dev/null 2>&1
+# Her gece yarısı ghost ilan kontrolü
+0 0 * * * /usr/bin/php /home/kullanici/cron/ghost-fallback.php >> /dev/null 2>&1
 
-# Her 5 dakikada bildirim temizleme (isteğe bağlı)
-*/5 * * * * php /home/kullanici/cron/temizlik.php >> /dev/null 2>&1
+# Her gece saat 01:00'de eşleştirme kontrolü
+0 1 * * * /usr/bin/php /home/kullanici/cron/eslestirme-kontrol.php >> /dev/null 2>&1
+
+# Her gece saat 02:00'de otomatik görev oluşturma
+0 2 * * * /usr/bin/php /home/kullanici/cron/gorev-olustur.php >> /dev/null 2>&1
 ```
+
+> `kullanici` yerine cPanel kullanıcı adınızı yazın.
+> PHP yolu için önce `which php` komutuyla doğru yolu öğrenin.
 
 ---
 
@@ -167,8 +194,10 @@ cPanel → **Cron Jobs** → aşağıdaki görevleri ekleyin:
 ### 1. Sunucuya Bağlanma
 
 ```bash
-ssh root@vps.yourdomain.com
+ssh root@vps-ip-adresiniz
 ```
+
+---
 
 ### 2. Docker Kurulumu
 
@@ -181,9 +210,11 @@ systemctl enable docker && systemctl start docker
 apt-get install -y docker-compose-plugin
 
 # Doğrulama
-docker --version       # Docker 25.x.x
-docker compose version # Docker Compose v2.x.x
+docker --version
+docker compose version
 ```
+
+---
 
 ### 3. Proje Dosyalarını Yükleme
 
@@ -192,65 +223,67 @@ docker compose version # Docker Compose v2.x.x
 mkdir -p /opt/emlakradar-scraper
 cd /opt/emlakradar-scraper
 
-# Dosyaları yükle (scp veya git clone)
-scp -r ./emlakradar-scraper/* root@vps.yourdomain.com:/opt/emlakradar-scraper/
-
-# veya git clone
-git clone https://github.com/yourrepo/emlakradar.git .
-cp -r emlakradar-scraper/* /opt/emlakradar-scraper/
+# Yerel makineden dosyaları kopyala
+scp -r ./emlakradar-scraper/* root@vps-ip:/opt/emlakradar-scraper/
 ```
+
+---
 
 ### 4. Ortam Değişkenlerini Ayarlama
 
 ```bash
+cd /opt/emlakradar-scraper
 cp .env.example .env
 nano .env
 ```
 
-`.env` dosyasını düzenleyin:
+`.env` dosyasını doldurun:
 
 ```env
-# cPanel bağlantısı
-CPANEL_API_URL=https://yourdomain.com/api/webhook.php
-CPANEL_WEBHOOK_SECRET=cok_gizli_anahtar_min_32_karakter   # app.php ile AYNI
+# cPanel Panel API bağlantısı
+CPANEL_API_URL=https://hetagayrimenkul.com/api/webhook.php
+CPANEL_WEBHOOK_SECRET=guclu-bir-secret-key-buraya-min-32-karakter   # app.php ile AYNI olmalı
 
-# Redis (Docker içinde otomatik)
-REDIS_HOST=redis
+# Redis (Docker içinde otomatik, değiştirme)
+REDIS_HOST=127.0.0.1
 REDIS_PORT=6379
-REDIS_PASSWORD=                   # Boş bırakabilirsiniz
-REDIS_DB=0
+REDIS_PASSWORD=
 
 # WebSocket
 WEBSOCKET_PORT=3001
-CPANEL_CORS_ORIGIN=https://yourdomain.com
+WEBSOCKET_CORS_ORIGIN=https://hetagayrimenkul.com
 
 # Scraper ayarları
-SCRAPE_INTERVAL_MINUTES=30        # Her 30 dakikada scrape
-SCRAPE_DELAY_MIN=2000             # 2 saniye min bekleme
-SCRAPE_DELAY_MAX=6000             # 6 saniye max bekleme
-SCRAPE_MAX_PAGES=5                # Kaynak başına max sayfa
+SCRAPE_INTERVAL_MINUTES=10
+SCRAPE_CITIES=kocaeli,istanbul,ankara,izmir
+SCRAPE_MAX_PAGES=5
+SCRAPE_DELAY_MIN=3000
+SCRAPE_DELAY_MAX=10000
 
-# Proxy listesi (isteğe bağlı, boş bırakılabilir)
+# Proxy listesi (opsiyonel)
 PROXY_LIST=
 
-# Log seviyesi
+# Log seviyesi: error | warn | info | debug
 LOG_LEVEL=info
 
 # Ghost tracker
 GHOST_CHECK_INTERVAL_HOURS=6
+GHOST_BATCH_SIZE=50
 ```
+
+---
 
 ### 5. Firewall Ayarı
 
 ```bash
 # UFW (Ubuntu)
-ufw allow 3001/tcp    # Socket.io WebSocket
 ufw allow 22/tcp      # SSH
+ufw allow 3001/tcp    # Socket.io WebSocket
 ufw enable
-
-# veya iptables
-iptables -A INPUT -p tcp --dport 3001 -j ACCEPT
+ufw status
 ```
+
+---
 
 ### 6. Docker ile Başlatma
 
@@ -267,13 +300,15 @@ docker compose up -d
 docker compose logs -f scraper
 ```
 
+---
+
 ### 7. Servis Durumu Kontrolü
 
 ```bash
 # Container'lar çalışıyor mu?
 docker compose ps
 
-# Çıktı:
+# Beklenen çıktı:
 # NAME                   STATUS     PORTS
 # emlakradar-redis       Up         6379/tcp
 # emlakradar-scraper     Up         0.0.0.0:3001->3001/tcp
@@ -285,6 +320,8 @@ docker compose logs --tail=50 scraper
 docker exec emlakradar-redis redis-cli ping
 # PONG
 ```
+
+---
 
 ### 8. Sistem Servisi (Otomatik Başlatma)
 
@@ -312,18 +349,19 @@ systemctl enable emlakradar
 systemctl start emlakradar
 ```
 
-### 9. SSL ile WebSocket (Nginx Reverse Proxy)
+---
+
+### 9. SSL ile WebSocket — Nginx Reverse Proxy (Opsiyonel)
 
 Eğer domain'inizin SSL sertifikasıyla WebSocket sunmak istiyorsanız:
 
 ```bash
 apt-get install -y nginx certbot python3-certbot-nginx
 
-# Nginx config
 cat > /etc/nginx/sites-available/emlakradar << 'EOF'
 server {
     listen 80;
-    server_name vps.yourdomain.com;
+    server_name vps.hetagayrimenkul.com;
 
     location / {
         proxy_pass http://localhost:3001;
@@ -343,49 +381,43 @@ ln -s /etc/nginx/sites-available/emlakradar /etc/nginx/sites-enabled/
 nginx -t && systemctl reload nginx
 
 # SSL sertifikası
-certbot --nginx -d vps.yourdomain.com
+certbot --nginx -d vps.hetagayrimenkul.com
 ```
 
 `.env` dosyasında güncelleyin:
 ```env
-WEBSOCKET_PORT=3001
-CPANEL_CORS_ORIGIN=https://yourdomain.com
-```
-
-`meta` etiketinde:
-```html
-<meta name="vps-socket-url" content="https://vps.yourdomain.com">
+WEBSOCKET_CORS_ORIGIN=https://hetagayrimenkul.com
 ```
 
 ---
 
 ## Chrome Extension Kurulumu
 
-### 1. Dosyaları İndirme
+### 1. Dosyaları Hazırlama
 
-```bash
-# Yerel makinede
-scp -r root@yourdomain.com:/home/kullanici/extension ./emlakradar-extension
-# veya proje klasöründen kopyalayın
-```
+Proje klasöründeki `extension/` dizinini yerel makinenize indirin.
+
+---
 
 ### 2. Chrome'a Yükleme
 
-1. Chrome'u açın, adres çubuğuna yazın: `chrome://extensions/`
+1. Chrome'u açın: `chrome://extensions/`
 2. Sağ üstte **"Geliştirici modu"** anahtarını açın
-3. **"Paketlenmemiş öğe yükle"** butonuna tıklayın
-4. `extension/` klasörünü seçin
-5. EmlakRadar Pro ikonunun araç çubuğunda göründüğünü doğrulayın
+3. **"Paketlenmemiş öğe yükle"** → `extension/` klasörünü seçin
+4. EmlakRadar Pro ikonunun araç çubuğunda göründüğünü doğrulayın
+
+---
 
 ### 3. Extension Ayarları
 
 Extension ikonuna sağ tıklayın → **Seçenekler**:
 
 ```
-Panel URL  : https://yourdomain.com
-API Key    : [cPanel'den alınan API anahtarı]
-Otomatik   : ✅ Etkin
+Panel URL : https://hetagayrimenkul.com
+Otomatik  : Etkin
 ```
+
+---
 
 ### 4. İzinler Doğrulama
 
@@ -400,9 +432,7 @@ Otomatik   : ✅ Etkin
 
 ### 1. Manifest Doğrulama
 
-Chrome DevTools → **Application** → **Manifest** bölümüne gidin.
-
-Şunları doğrulayın:
+Chrome DevTools → **Application** → **Manifest**:
 - ✅ `name` ve `short_name` gösteriyor
 - ✅ İkon 192x192 ve 512x512 yüklü
 - ✅ `start_url` erişilebilir
@@ -416,30 +446,33 @@ Chrome DevTools → **Application** → **Service Workers**:
 
 ### 3. Ana Ekrana Ekleme
 
-**Android (Chrome):**
-1. Chrome'da siteyi açın
-2. Sağ üst menü → **"Ana ekrana ekle"**
-3. Uygulama adını onaylayın → **Ekle**
+**Android (Chrome):** Sağ üst menü → **"Ana ekrana ekle"**
 
-**iOS (Safari):**
-1. Safari'de siteyi açın
-2. Alt menüde paylaşım simgesi
-3. **"Ana Ekrana Ekle"**
-4. Adı onaylayın → **Ekle**
+**iOS (Safari):** Alt menü paylaşım simgesi → **"Ana Ekrana Ekle"**
 
-**Masaüstü Chrome:**
-1. Adres çubuğunda install ikonu
-2. **"Yükle"** butonuna tıklayın
-
-### 4. Push Bildirimleri
-
-- Site ilk açıldıktan 30 saniye sonra bildirim izni istenir
-- **İzin ver** → Push bildirimleri aktif olur
-- VAPID anahtarları `app.php`'de doğru tanımlanmış olmalı
+**Masaüstü Chrome:** Adres çubuğunda install ikonu → **"Yükle"**
 
 ---
 
 ## Sorun Giderme
+
+### Dashboard Fatal Error
+
+**Belirti:** Dashboard'da beyaz sayfa, tab'da `Fatal error` yazıyor.
+
+**Kontrol:**
+```bash
+tail -f ~/logs/error.log
+```
+
+**Olası neden — APP_ENV production ama hata gizlenmiş:**
+`app/config/app.php` dosyasında geçici olarak:
+```php
+define('APP_ENV', 'development');
+```
+yazıp hatayı görün, sonra tekrar `production` yapın.
+
+---
 
 ### Webhook Çalışmıyor
 
@@ -447,144 +480,101 @@ Chrome DevTools → **Application** → **Service Workers**:
 
 ```bash
 # VPS tarafında test
-curl -X POST https://yourdomain.com/api/webhook.php \
+curl -X POST https://hetagayrimenkul.com/api/webhook.php \
   -H "Content-Type: application/json" \
-  -H "X-Webhook-Signature: sha256=$(echo -n '{"tip":"test"}' | openssl dgst -sha256 -hmac 'cok_gizli_anahtar_min_32_karakter' | cut -d' ' -f2)" \
-  -d '{"tip":"yeni_ilan","ilanlar":[],"zaman":"2024-01-01T00:00:00Z","kaynak":"test"}'
+  -H "X-Webhook-Secret: guclu-bir-secret-key-buraya-min-32-karakter" \
+  -d '{"tip":"test","ilanlar":[]}'
 ```
 
-**Beklenen yanıt:** `{"success":true,"data":{"eklenen":0,"atilan":0}}`
+**Beklenen yanıt:** `{"success":true}`
 
-**Sorun — 403 Geçersiz imza:**
-- `VPS_WEBHOOK_SECRET` değerinin `.env` ve `app.php`'de **tamamen aynı** olduğunu doğrulayın
-- Fazladan boşluk veya satır sonu olmadığını kontrol edin
+**Sorun — 403:**
+- `CPANEL_WEBHOOK_SECRET` değerinin `.env` ve `app/config/app.php`'de **tamamen aynı** olduğunu doğrulayın
 
-**Sorun — 403 IP yetkisiz:**
-- `VPS_ALLOWED_IPS` ayarını kontrol edin
-- VPS'in genel IP'sini `curl ifconfig.me` ile doğrulayın
-- Test için `VPS_ALLOWED_IPS` boş bırakın (tüm IP'lere izin verir)
+---
 
 ### WebSocket Bağlanmıyor
 
-**Belirti:** Panelde gerçek zamanlı veri gelmiyor, `[Socket] Bağlantı hatası` konsol hatası.
+**Belirti:** Panelde gerçek zamanlı veri gelmiyor.
 
 ```bash
 # Port açık mı?
-nc -zv vps.yourdomain.com 3001
+nc -zv vps-ip 3001
 
 # Container çalışıyor mu?
 docker compose ps
 
-# Socket sunucusu log
-docker compose logs scraper | grep "WebSocket"
+# Loglar
+docker compose logs scraper | grep -i "websocket\|error"
 ```
 
-**Sorun — Firewall:**
-```bash
-# Ubuntu UFW
-ufw status | grep 3001
-ufw allow 3001/tcp
-```
-
-**Sorun — CORS hatası:**
-`.env` dosyasında `CPANEL_CORS_ORIGIN` değerini `https://yourdomain.com` olarak ayarlayın.
+---
 
 ### Redis Bağlantı Hatası
 
 ```bash
-# Redis container kontrol
 docker compose exec redis redis-cli ping
+# PONG çıktısı beklenir
 
-# Loglar
 docker compose logs redis
-
-# Redis'i yeniden başlat
 docker compose restart redis
 ```
+
+---
 
 ### Scraper 0 İlan Buluyor
 
 **Olası nedenler:**
-1. Site yapısı değişmiş (CSS seçiciler güncel değil)
-2. Bot tespiti — Proxy kullanmayı deneyin
-3. Cloudflare engeli — Daha uzun bekleme süreleri ayarlayın
+1. Bot tespiti — `SCRAPE_DELAY_MIN/MAX` değerlerini artırın
+2. `SCRAPE_CITIES` boş veya yanlış yazılmış
 
-```bash
-# .env dosyasında
-SCRAPE_DELAY_MIN=5000    # 5 saniye
-SCRAPE_DELAY_MAX=15000   # 15 saniye
-SCRAPE_MAX_PAGES=2       # Test için sadece 2 sayfa
+```env
+# .env içinde
+SCRAPE_DELAY_MIN=5000
+SCRAPE_DELAY_MAX=15000
+SCRAPE_MAX_PAGES=2
+SCRAPE_CITIES=kocaeli
 ```
+
+---
 
 ### Docker Build Hatası
 
 ```bash
-# Cache temizle ve yeniden build et
 docker compose down
 docker system prune -f
 docker compose build --no-cache
 docker compose up -d
 ```
 
-### Chromium Crash Ediyor
-
-```bash
-# Paylaşılan bellek sorunu — shm_size'ı artır
-# docker-compose.yml içinde:
-# shm_size: '2gb'
-
-# Veya /dev/shm mount
-# volumes:
-#   - /dev/shm:/dev/shm
-```
+---
 
 ### Logları Kontrol Etme
 
 ```bash
-# Scraper logları (son 100 satır)
+# PHP hata logları (cPanel)
+tail -f ~/logs/error.log
+
+# Scraper logları
 docker compose logs --tail=100 scraper
 
-# Hata logları
+# Scraper hata logları
 docker compose exec scraper cat /app/logs/error.log
 
-# cPanel logları (PHP error_log)
-tail -f ~/logs/error_log
-
-# Webhook istek logları
+# Webhook erişim logları
 tail -f ~/access_log | grep webhook
-```
-
-### Veritabanı Bağlantı Hatası
-
-```bash
-# cPanel phpMyAdmin ile test edin
-# veya SSH ile:
-mysql -u emlakradar_user -p emlakradar_db -e "SELECT 1;"
-
-# app.php credentials doğrulama
-php -r "
-define('DB_HOST', 'localhost');
-define('DB_NAME', 'emlakradar_db');
-define('DB_USER', 'emlakradar_user');
-define('DB_PASS', 'your_password');
-try {
-    \$pdo = new PDO('mysql:host='.DB_HOST.';dbname='.DB_NAME, DB_USER, DB_PASS);
-    echo 'Bağlantı başarılı';
-} catch(Exception \$e) {
-    echo 'Hata: '.\$e->getMessage();
-}
-"
 ```
 
 ---
 
 ## Güvenlik Notları
 
-- `VPS_WEBHOOK_SECRET` en az 32 karakter olmalı
-- `VPS_ALLOWED_IPS` mutlaka ayarlanmalı (production'da)
+- `CPANEL_WEBHOOK_SECRET` en az 32 karakter olmalı
+- `JWT_SECRET` en az 32 karakter olmalı
+- `app/`, `cron/`, `database/` klasörlerine `.htaccess` ile web erişimi engellenmeli (mevcut `.htaccess` bunu zaten yapıyor)
+- `logs/` klasörü `public_html/` dışında tutulmalı
 - SSL sertifikası zorunlu (HTTPS)
-- `app/config/app.php` web'den erişilemez olmalı (`/.htaccess` ile)
-- Düzenli yedekleme: veritabanı + `storage/` klasörü
+- Düzenli yedekleme: veritabanı + `public_html/uploads/` klasörü
 
 ---
 
@@ -593,9 +583,9 @@ try {
 ### cPanel Güncelleme
 
 ```bash
-# Dosyaları yükle (FTP/SFTP)
-# Veritabanı migration varsa çalıştır
-mysql -u emlakradar_user -p emlakradar_db < database/migration_vX.X.sql
+# FTP/SFTP ile dosyaları yükle
+# Varsa migration çalıştır
+mysql -u hetagayrimenkul_user -p hetagayrimenkul_db < database/migration.sql
 ```
 
 ### VPS Scraper Güncelleme
@@ -603,7 +593,7 @@ mysql -u emlakradar_user -p emlakradar_db < database/migration_vX.X.sql
 ```bash
 cd /opt/emlakradar-scraper
 docker compose down
-git pull  # veya scp ile dosyaları güncelle
+# Dosyaları güncelle (scp veya git pull)
 docker compose build
 docker compose up -d
 ```
@@ -612,7 +602,7 @@ docker compose up -d
 
 1. `chrome://extensions/` açın
 2. EmlakRadar Pro → **Güncelle** düğmesi
-3. Veya yeni sürümü sürükleyip bırakın
+3. Veya yeni `extension/` klasörünü sürükleyip bırakın
 
 ---
 
