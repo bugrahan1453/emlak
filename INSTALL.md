@@ -202,12 +202,10 @@ ssh root@vps-ip-adresiniz
 ### 2. Docker Kurulumu
 
 ```bash
-# Ubuntu/Debian için
-curl -fsSL https://get.docker.com | sh
+# AlmaLinux için
+dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 systemctl enable docker && systemctl start docker
-
-# Docker Compose eklentisi
-apt-get install -y docker-compose-plugin
 
 # Doğrulama
 docker --version
@@ -276,11 +274,12 @@ GHOST_BATCH_SIZE=50
 ### 5. Firewall Ayarı
 
 ```bash
-# UFW (Ubuntu)
-ufw allow 22/tcp      # SSH
-ufw allow 3001/tcp    # Socket.io WebSocket
-ufw enable
-ufw status
+# firewalld (AlmaLinux)
+systemctl enable firewalld && systemctl start firewalld
+firewall-cmd --permanent --add-port=22/tcp      # SSH
+firewall-cmd --permanent --add-port=3001/tcp    # Socket.io WebSocket
+firewall-cmd --reload
+firewall-cmd --list-ports
 ```
 
 ---
@@ -356,7 +355,7 @@ systemctl start emlakradar
 Eğer domain'inizin SSL sertifikasıyla WebSocket sunmak istiyorsanız:
 
 ```bash
-apt-get install -y nginx certbot python3-certbot-nginx
+dnf install -y nginx certbot python3-certbot-nginx
 
 cat > /etc/nginx/sites-available/emlakradar << 'EOF'
 server {
