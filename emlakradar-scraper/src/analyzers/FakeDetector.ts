@@ -59,11 +59,11 @@ const saticiCache: SaticiCache = {};
  */
 export function analyzeFake(ilan: IlanVeri, tumIlanlar: IlanVeri[]): FakeDetectionResult {
   let skor = 0;
-  const sebepler: string[] = [];
+  const nedenler: string[] = [];
 
   // ── 1. Aynı telefon 3+ ilan (+30) ──────────────────────────────
-  if (ilan.satici?.telefon) {
-    const tel = ilan.satici.telefon;
+  if (ilan.telefon) {
+    const tel = ilan.telefon;
     if (!phoneCache[tel]) {
       phoneCache[tel] = { ilanIds: new Set() };
     }
@@ -71,34 +71,34 @@ export function analyzeFake(ilan: IlanVeri, tumIlanlar: IlanVeri[]): FakeDetecti
 
     // Tüm ilanlardan aynı telefona sahip olanları say
     const ayniTelSayisi = tumIlanlar.filter(
-      i => i.satici?.telefon === tel && i.kaynak_id !== ilan.kaynak_id
+      i => i.telefon === tel && i.kaynak_id !== ilan.kaynak_id
     ).length + phoneCache[tel].ilanIds.size;
 
     if (ayniTelSayisi >= 3) {
       skor += 30;
-      sebepler.push(`Aynı telefon numarası ${ayniTelSayisi} ilanda kullanılıyor`);
+      nedenler.push(`Aynı telefon numarası ${ayniTelSayisi} ilanda kullanılıyor`);
     }
   }
 
   // ── 2. Emlak ajanı anahtar kelimeleri (+20) ─────────────────────
-  const saticiAd = turkishLower(ilan.satici?.ad || '');
+  const saticiAd = turkishLower(ilan.satici_ad || '');
   const ajansHit = AJANS_ANAHTAR_KELIMELERI.filter(k => saticiAd.includes(turkishLower(k)));
   if (ajansHit.length >= 2) {
     skor += 20;
-    sebepler.push(`Satıcı adında ajans anahtar kelimeleri: ${ajansHit.slice(0, 3).join(', ')}`);
+    nedenler.push(`Satıcı adında ajans anahtar kelimeleri: ${ajansHit.slice(0, 3).join(', ')}`);
   } else if (ajansHit.length === 1) {
     skor += 10;
-    sebepler.push(`Satıcı adında ajans anahtar kelimesi: ${ajansHit[0]}`);
+    nedenler.push(`Satıcı adında ajans anahtar kelimesi: ${ajansHit[0]}`);
   }
 
   // ── 3. Profesyonel fotoğraf kalitesi/sayısı (+15) ────────────────
   const fotografSayisi = ilan.fotograflar?.length ?? 0;
   if (fotografSayisi >= 15) {
     skor += 15;
-    sebepler.push(`${fotografSayisi} fotoğraf — profesyonel çekim ihtimali yüksek`);
+    nedenler.push(`${fotografSayisi} fotoğraf — profesyonel çekim ihtimali yüksek`);
   } else if (fotografSayisi >= 10) {
     skor += 8;
-    sebepler.push(`${fotografSayisi} fotoğraf — profesyonel ilan olabilir`);
+    nedenler.push(`${fotografSayisi} fotoğraf — profesyonel ilan olabilir`);
   }
 
   // ── 4. Ajans metin kalıpları (+15) ──────────────────────────────
@@ -106,21 +106,21 @@ export function analyzeFake(ilan: IlanVeri, tumIlanlar: IlanVeri[]): FakeDetecti
   const metinHitler = AJANS_METIN_KALIPLARI.filter(p => p.test(aciklama));
   if (metinHitler.length >= 2) {
     skor += 15;
-    sebepler.push(`Açıklamada ${metinHitler.length} profesyonel ajans ifadesi bulundu`);
+    nedenler.push(`Açıklamada ${metinHitler.length} profesyonel ajans ifadesi bulundu`);
   } else if (metinHitler.length === 1) {
     skor += 7;
-    sebepler.push('Açıklamada profesyonel ajans ifadesi bulundu');
+    nedenler.push('Açıklamada profesyonel ajans ifadesi bulundu');
   }
 
   // ── 5. Kurumsal isim (+10) ──────────────────────────────────────
-  const kurumsalHit = KURUMSAL_ISIM_KALIPLARI.find(p => p.test(saticiAd) || p.test(ilan.satici?.eposta || ''));
+  const kurumsalHit = KURUMSAL_ISIM_KALIPLARI.find(p => p.test(saticiAd));
   if (kurumsalHit) {
     skor += 10;
-    sebepler.push('Satıcı adında kurumsal yapı belirteci bulundu');
+    nedenler.push('Satıcı adında kurumsal yapı belirteci bulundu');
   }
 
   // ── 6. Aynı kişi 2+ ilan (+10) ──────────────────────────────────
-  const saticiKimlik = ilan.satici?.ad?.trim();
+  const saticiKimlik = ilan.satici_ad?.trim();
   if (saticiKimlik) {
     const key = turkishLower(saticiKimlik);
     if (!saticiCache[key]) {
@@ -129,37 +129,36 @@ export function analyzeFake(ilan: IlanVeri, tumIlanlar: IlanVeri[]): FakeDetecti
     saticiCache[key].ilanIds.add(ilan.kaynak_id);
 
     const ayniSaticiSayisi = tumIlanlar.filter(
-      i => turkishLower(i.satici?.ad?.trim() || '') === key && i.kaynak_id !== ilan.kaynak_id
+      i => turkishLower(i.satici_ad?.trim() || '') === key && i.kaynak_id !== ilan.kaynak_id
     ).length + saticiCache[key].ilanIds.size - 1;
 
     if (ayniSaticiSayisi >= 2) {
       skor += 10;
-      sebepler.push(`Aynı satıcı ${ayniSaticiSayisi + 1} ilanda görünüyor`);
+      nedenler.push(`Aynı satıcı ${ayniSaticiSayisi + 1} ilanda görünüyor`);
     }
   }
 
   // ── 7. Fiyat çok düşük (tuzak ilan) (+10) ───────────────────────
-  if (ilan.fiyat && ilan.ozellikler.metrekare) {
-    const m2Fiyat = ilan.fiyat / ilan.ozellikler.metrekare;
+  if (ilan.fiyat && ilan.metrekare) {
+    const m2Fiyat = ilan.fiyat / ilan.metrekare;
     // 10.000 TL/m² altı İstanbul/Ankara merkezde şüpheli
-    if (m2Fiyat < 10000 && ilan.konum.il && ['istanbul', 'ankara', 'izmir'].includes(turkishLower(ilan.konum.il))) {
+    if (m2Fiyat < 10000 && ilan.sehir && ['istanbul', 'ankara', 'izmir'].includes(turkishLower(ilan.sehir))) {
       skor += 10;
-      sebepler.push(`m² başına fiyat çok düşük: ${Math.round(m2Fiyat).toLocaleString('tr-TR')} TL`);
+      nedenler.push(`m² başına fiyat çok düşük: ${Math.round(m2Fiyat).toLocaleString('tr-TR')} TL`);
     }
   }
 
   const skorSinirli = Math.min(skor, 100);
-  const sahte = skorSinirli >= 50;
+  const muhtemelen_sahte = skorSinirli >= 50;
 
-  if (sahte) {
+  if (muhtemelen_sahte) {
     logger.info(`Sahte ilan tespit edildi: ${ilan.kaynak_id} (skor: ${skorSinirli})`);
   }
 
   return {
     skor: skorSinirli,
-    sahte,
-    sebepler,
-    sonuc: sahte ? 'muhtemelen_sahte' : 'gercek',
+    muhtemelen_sahte,
+    nedenler,
   };
 }
 

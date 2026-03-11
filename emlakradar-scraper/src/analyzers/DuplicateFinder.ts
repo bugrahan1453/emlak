@@ -26,7 +26,7 @@ export function findDuplicate(ilan: IlanVeri, mevcutIlanlar: IlanVeri[]): Duplic
   const adaylar = bulaAday(ilan, mevcutIlanlar);
 
   if (adaylar.length === 0) {
-    return { mukerrer: false, benzerlik: 0, karsilastirilanId: null, grupId: null };
+    return { mukerrer: false, benzerlik_skoru: 0 };
   }
 
   let enYuksekBenzerlik = 0;
@@ -41,19 +41,19 @@ export function findDuplicate(ilan: IlanVeri, mevcutIlanlar: IlanVeri[]): Duplic
   }
 
   if (enYuksekBenzerlik < SIMILARITY_THRESHOLD || !enYuksekAday) {
-    return { mukerrer: false, benzerlik: enYuksekBenzerlik, karsilastirilanId: null, grupId: null };
+    return { mukerrer: false, benzerlik_skoru: enYuksekBenzerlik };
   }
 
   // Gruba ekle veya yeni grup oluştur
-  const grupId = getOrCreateGroup(ilan, enYuksekAday);
+  const grup_id = getOrCreateGroup(ilan, enYuksekAday);
 
   logger.info(`Mükerrer ilan: ${ilan.kaynak_id} ↔ ${enYuksekAday.kaynak_id} (benzerlik: ${Math.round(enYuksekBenzerlik * 100)}%)`);
 
   return {
     mukerrer: true,
-    benzerlik: enYuksekBenzerlik,
-    karsilastirilanId: enYuksekAday.kaynak_id,
-    grupId,
+    benzerlik_skoru: enYuksekBenzerlik,
+    eslesen_ilan: enYuksekAday.kaynak_id,
+    grup_id,
   };
 }
 
@@ -61,26 +61,26 @@ export function findDuplicate(ilan: IlanVeri, mevcutIlanlar: IlanVeri[]): Duplic
  * Ön filtre: mahalle + m² ±%5 + oda sayısı uyuşan adayları döndürür
  */
 function bulaAday(ilan: IlanVeri, mevcutIlanlar: IlanVeri[]): IlanVeri[] {
-  const m2 = ilan.ozellikler.metrekare;
-  const oda = ilan.ozellikler.oda_sayisi;
-  const mahalle = turkishLower(ilan.konum.mahalle || ilan.konum.ilce || '');
+  const m2 = ilan.metrekare;
+  const oda = ilan.oda_sayisi;
+  const mahalle = turkishLower(ilan.mahalle || ilan.ilce || '');
 
   return mevcutIlanlar.filter(i => {
     if (i.kaynak_id === ilan.kaynak_id) return false;
     if (i.tip !== ilan.tip) return false; // satilik/kiralik eşleşmeli
 
     // Mahalle kontrolü
-    const iMahalle = turkishLower(i.konum.mahalle || i.konum.ilce || '');
+    const iMahalle = turkishLower(i.mahalle || i.ilce || '');
     if (mahalle && iMahalle && mahalle !== iMahalle) return false;
 
     // m² ±%5
-    if (m2 && i.ozellikler.metrekare) {
-      const fark = Math.abs(m2 - i.ozellikler.metrekare) / m2;
+    if (m2 && i.metrekare) {
+      const fark = Math.abs(m2 - i.metrekare) / m2;
       if (fark > 0.05) return false;
     }
 
     // Oda sayısı
-    if (oda && i.ozellikler.oda_sayisi && oda !== i.ozellikler.oda_sayisi) return false;
+    if (oda && i.oda_sayisi && oda !== i.oda_sayisi) return false;
 
     return true;
   });
@@ -120,8 +120,8 @@ function hesaplaBenzerlik(a: IlanVeri, b: IlanVeri): number {
   }
 
   // Konum eşleşmesi (ağırlık: 10)
-  if (a.konum.ilce && b.konum.ilce) {
-    skor += (turkishLower(a.konum.ilce) === turkishLower(b.konum.ilce) ? 1 : 0) * 10;
+  if (a.ilce && b.ilce) {
+    skor += (turkishLower(a.ilce) === turkishLower(b.ilce) ? 1 : 0) * 10;
     agirlik += 10;
   }
 
