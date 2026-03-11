@@ -16,12 +16,24 @@ services:
       timeout: 5s
       retries: 5
 
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: emlakradar-flaresolverr
+    environment:
+      - LOG_LEVEL=info
+      - TZ=Europe/Istanbul
+    ports:
+      - "8191:8191"
+    restart: unless-stopped
+
   scraper:
     build: .
     container_name: emlakradar-scraper
     depends_on:
       redis:
         condition: service_healthy
+      flaresolverr:
+        condition: service_started
     env_file: .env
     environment:
       - REDIS_HOST=redis

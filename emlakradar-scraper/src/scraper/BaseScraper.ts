@@ -13,6 +13,7 @@ import { sendYeniIlanlar, sendGuncelleme, sendFiyatDegisiklik, sendSahteIlan } f
 import { emitYeniIlan, emitKirmiziAlarm, emitFiyatDegisiklik } from '../websocket/SocketServer';
 import { randomDelay, fiyatDegisimYuzdesi } from '../utils/Helpers';
 import { createLogger } from '../utils/Logger';
+import { solveCloudflare, isCloudflarePage, FlareCookie } from '../utils/FlareSolverr';
 import { config } from '../config';
 
 export abstract class BaseScraper {
@@ -89,13 +90,53 @@ export abstract class BaseScraper {
   }
 
   /**
-   * URL'e git (insan gibi)
+   * URL'e git (insan gibi) — Cloudflare tespit edilirse FlareSolverr ile çözer
    */
   protected async navigateTo(page: Page, url: string, waitMs?: [number, number]): Promise<void> {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+
+    // CF koruması var mı kontrol et
+    const title = await page.title().catch(() => '');
+    const bodySnippet = await page.evaluate(() => document.body?.innerHTML?.substring(0, 500) ?? '').catch(() => '');
+
+    if (isCloudflarePage(title, bodySnippet)) {
+      this.logger.warn(`Cloudflare tespit edildi: ${url} — FlareSolverr devreye giriyor`);
+      await this.bypassCloudflare(page, url);
+    }
+
     const [min, max] = waitMs ?? [config.scraper.delayMin, config.scraper.delayMax];
     await randomDelay(min, max);
     await randomMouseMove(page);
+  }
+
+  /**
+   * FlareSolverr ile CF cookie alır ve sayfaya inject eder
+   */
+  private async bypassCloudflare(page: Page, url: string): Promise<void> {
+    const result = await solveCloudflare(url);
+    if (!result) {
+      this.logger.error('FlareSolverr CF çözümü başarısız');
+      return;
+    }
+
+    // Cookie'leri Puppeteer formatına çevir ve set et
+    const puppeteerCookies = result.cookies.map((c: FlareCookie) => ({
+      name: c.name,
+      value: c.value,
+      domain: c.domain.startsWith('.') ? c.domain : `.${c.domain}`,
+      path: c.path || '/',
+      expires: c.expires > 0 ? c.expires : undefined,
+      httpOnly: c.httpOnly,
+      secure: c.secure,
+      sameSite: (c.sameSite as 'Strict' | 'Lax' | 'None') || 'Lax',
+    }));
+
+    await page.setCookie(...puppeteerCookies);
+    await page.setUserAgent(result.userAgent);
+
+    // Cookie'leri set ettikten sonra tekrar git
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    this.logger.info(`CF bypass tamamlandı: ${url}`);
   }
 
   /**
