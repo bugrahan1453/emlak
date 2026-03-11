@@ -12,7 +12,7 @@ let cronTask: cron.ScheduledTask | null = null;
 
 /**
  * Scrape interval'den cron ifadesi üretir
- * Örn: 30 dakika → "*/30 * * * *"
+ * Örn: 30 dakika → "* /30 * * * *"
  */
 function intervalToCron(dakika: number): string {
   if (dakika < 60) return `*/${dakika} * * * *`;
