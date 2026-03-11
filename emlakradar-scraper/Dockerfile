@@ -36,7 +36,7 @@ WORKDIR /app
 
 # Bağımlılıkları önce yükle (Docker layer cache için)
 COPY package*.json ./
-RUN npm ci --only=production
+RUN npm install --omit=dev
 
 # TypeScript derle
 COPY tsconfig.json ./
