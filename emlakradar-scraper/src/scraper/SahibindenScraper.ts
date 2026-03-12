@@ -37,9 +37,7 @@ export class SahibindenScraper extends BaseScraper {
     const page = await this.newPage();
 
     try {
-      // usertype=0 → sadece bireysel (sahibinden) ilanlar, emlakçı değil
-      const baseParams = 'usertype=0';
-      const ilkUrl = `${this.baseUrl}${yol}?${baseParams}`;
+      const ilkUrl = `${this.baseUrl}${yol}`;
       await this.navigateWithFlareSolverr(page, ilkUrl);
 
       // Toplam sayfa sayısını bul
@@ -51,7 +49,7 @@ export class SahibindenScraper extends BaseScraper {
       for (let sayfa = 1; sayfa <= taranacakSayfa; sayfa++) {
         const sayfaUrl = sayfa === 1
           ? ilkUrl
-          : `${this.baseUrl}${yol}?${baseParams}&pagingOffset=${(sayfa - 1) * ITEMS_PER_PAGE}`;
+          : `${ilkUrl}?pagingOffset=${(sayfa - 1) * ITEMS_PER_PAGE}`;
 
         if (sayfa > 1) {
           await this.navigateWithFlareSolverr(page, sayfaUrl);
@@ -94,10 +92,6 @@ export class SahibindenScraper extends BaseScraper {
         try {
           const id = satir.getAttribute('data-id') || '';
           if (!id) return;
-
-          // usertype=0 URL parametresi zaten emlakçıları filtreler,
-          // ek güvenlik için store-icon kontrolü
-          if (satir.querySelector('.store-icon')) return;
 
           const baslikEl = satir.querySelector('.classifiedTitle');
           const baslik = baslikEl?.textContent?.trim() || '';
