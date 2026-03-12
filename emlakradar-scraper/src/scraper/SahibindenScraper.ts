@@ -57,6 +57,27 @@ export class SahibindenScraper extends BaseScraper {
 
         await this.scrollPage(page);
         const ilanlar = await this.parseSayfaIlanlar(page, tip);
+
+        // Her ilan için detay sayfasından tüm foto + ek bilgileri çek
+        const detayPage = await this.newPage();
+        try {
+          for (const ilan of ilanlar) {
+            if (ilan.kaynak_url) {
+              const detay = await this.fetchIlanDetay(detayPage, ilan);
+              if (detay.fotograflar && detay.fotograflar.length > 0) ilan.fotograflar = detay.fotograflar;
+              if (detay.aciklama) ilan.aciklama = detay.aciklama;
+              if (detay.metrekare) ilan.metrekare = detay.metrekare;
+              if (detay.oda_sayisi) ilan.oda_sayisi = detay.oda_sayisi;
+              if (detay.bina_yasi) ilan.bina_yasi = detay.bina_yasi;
+              if (detay.kat) ilan.kat = detay.kat;
+              if (detay.isitma) ilan.isitma = detay.isitma;
+              if (detay.satici_ad) ilan.satici_ad = detay.satici_ad;
+            }
+          }
+        } finally {
+          await detayPage.close();
+        }
+
         await this.processIlanlar(ilanlar);
 
         this.logger.info(`Sayfa ${sayfa}/${taranacakSayfa}: ${ilanlar.length} ilan işlendi`);
@@ -170,7 +191,11 @@ export class SahibindenScraper extends BaseScraper {
    * İlan detay sayfasından ek bilgileri çeker (aciklama, satici, tüm fotograflar)
    */
   async fetchIlanDetay(page: Page, ilan: IlanVeri): Promise<Partial<IlanVeri>> {
-    await this.navigateTo(page, ilan.kaynak_url, [2000, 4000]);
+    try {
+      await this.navigateWithFlareSolverr(page, ilan.kaynak_url, [1500, 3000]);
+    } catch {
+      return {};
+    }
     await this.scrollPage(page);
 
     return page.evaluate(() => {
@@ -181,11 +206,16 @@ export class SahibindenScraper extends BaseScraper {
       const saticiAd = saticiAdEl?.textContent?.trim() || '';
 
       const fotograflar: string[] = [];
-      const fotografEls = document.querySelectorAll('.classifiedDetailMainPhotos img, .swiper-slide img') as NodeListOf<HTMLImageElement>;
+      const seen = new Set<string>();
+      const fotografEls = document.querySelectorAll(
+        '.classifiedDetailMainPhotos img, .swiper-slide img, [class*="photo"] img, [class*="gallery"] img'
+      ) as NodeListOf<HTMLImageElement>;
       fotografEls.forEach((img) => {
-        const url = img.getAttribute('data-src') || img.src;
-        if (url && !url.includes('no-image')) {
-          fotograflar.push(url);
+        const url = img.getAttribute('data-src') || img.getAttribute('data-lazy') || img.src;
+        if (url && url.startsWith('http') && !url.includes('no-image') && !url.includes('placeholder')) {
+          // Sahibinden CDN: /800x600/ formatını zorla
+          const fullUrl = url.replace(/\/\d+x\d+\//, '/800x600/');
+          if (!seen.has(fullUrl)) { seen.add(fullUrl); fotograflar.push(fullUrl); }
         }
       });
 
