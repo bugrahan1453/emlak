@@ -84,21 +84,21 @@ export class SahibindenScraper extends BaseScraper {
           const href = baslikEl?.getAttribute('href') || '';
           const kaynak_url = href.startsWith('http') ? href : baseUrl + href;
 
-          const fiyatEl = satir.querySelector('.searchResultsPriceValue');
+          const fiyatEl = satir.querySelector('td.searchResultsPriceValue span');
           const fiyatText = fiyatEl?.textContent?.trim() || '';
-          const fiyat = parseFloat(fiyatText.replace(/[^\d,]/g, '').replace(',', '.')) || null;
+          const fiyat = parseFloat(fiyatText.replace(/[^\d.]/g, '').replace(',', '.')) || null;
 
-          const lokasyonEl = satir.querySelector('.searchResultsLocationValue');
-          const lokasyonParcalar = lokasyonEl?.textContent?.trim().split('/').map((s: string) => s.trim()) || [];
+          const lokasyonEl = satir.querySelector('td.searchResultsLocationValue');
+          const lokasyonHtml = lokasyonEl?.innerHTML || '';
+          const lokasyonParcalar = lokasyonHtml.split(/<br\s*\/?>/i).map((s: string) => s.trim()).filter(Boolean);
 
-          const m2El = satir.querySelector('[title*="m²"], [title*="m2"]');
-          const m2Text = m2El?.textContent?.trim() || '';
+          const attrCells = satir.querySelectorAll('td.searchResultsAttributeValue');
+          const m2Text = attrCells[0]?.textContent?.trim() || '';
           const metrekare = parseFloat(m2Text.replace(/[^\d,]/g, '').replace(',', '.')) || null;
 
-          const odaEl = satir.querySelector('.searchResultsAttributeValue:nth-child(1)');
-          const odaText = odaEl?.textContent?.trim() || '';
+          const odaText = attrCells[1]?.textContent?.trim() || '';
 
-          const fotografEl = satir.querySelector('.searchResultsImage img') as HTMLImageElement | null;
+          const fotografEl = satir.querySelector('td.searchResultsLargeThumbnail img') as HTMLImageElement | null;
           const fotografUrl = fotografEl?.src || fotografEl?.getAttribute('data-src') || '';
 
           const tarihEl = satir.querySelector('.searchResultsDateValue');
