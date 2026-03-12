@@ -104,7 +104,7 @@ require_once APP_DIR . '/views/layout/header.php';
                 // İlan
                 '<div class="flex items-center gap-2">' .
                     '<div class="w-10 h-10 rounded-lg overflow-hidden flex-shrink-0" style="background:rgba(255,255,255,0.05);">' .
-                    ($foto ? '<img src="' . APP_URL . '/uploads/fotograflar/' . e(basename($foto)) . '" class="w-full h-full object-cover">' : '<div class="w-full h-full flex items-center justify-center">🏠</div>') .
+                    ($foto ? '<img src="' . (str_starts_with($foto, 'http') ? e($foto) : APP_URL . '/uploads/fotograflar/' . e(basename($foto))) . '" class="w-full h-full object-cover">' : '<div class="w-full h-full flex items-center justify-center">🏠</div>') .
                     '</div>' .
                     '<div><a href="' . APP_URL . '/ilan-detay.php?id=' . (int)$ilan['id'] . '" class="text-sm hover:text-cyan-400 transition-colors" style="color:#e8ecf4;">' . e(truncate($ilan['baslik'], 50)) . '</a>' .
                     '<p class="text-xs" style="color:#7a8599;">' . e($ilan['danisman_ad'] ?? 'Atanmamış') . '</p></div></div>',

@@ -276,35 +276,53 @@ switch ($tip) {
 
 // ── Yardımcı: Scraper verisini DB formatına çevir ─────────────────────────
 function mapIlanData(array $i): array {
+    // Flat (scraper) veya nested (eski format) her ikisini de destekle
+    $sehir   = $i['konum']['il']      ?? $i['sehir']    ?? '';
+    $ilce    = $i['konum']['ilce']    ?? $i['ilce']     ?? null;
+    $mahalle = $i['konum']['mahalle'] ?? $i['mahalle']  ?? null;
+    $adres   = $i['konum']['adres']   ?? $i['adres']    ?? null;
+
+    $metrekare  = (int)($i['ozellikler']['metrekare']  ?? $i['metrekare']  ?? 0) ?: null;
+    $oda_sayisi = $i['ozellikler']['oda_sayisi'] ?? $i['oda_sayisi'] ?? null;
+    $kat        = $i['ozellikler']['kat']        ?? $i['kat']        ?? null;
+    $bina_yasi  = (int)($i['ozellikler']['bina_yasi']  ?? $i['bina_yasi']  ?? 0) ?: null;
+    $isitma     = $i['ozellikler']['isitma']     ?? $i['isitma']     ?? null;
+    $banyo      = $i['ozellikler']['banyo_sayisi'] ?? $i['banyo_sayisi'] ?? null;
+
+    $satici_tel = $i['satici']['telefon'] ?? $i['satici_tel'] ?? null;
+    $satici_ad  = $i['satici']['ad']      ?? $i['satici_ad']  ?? null;
+
+    $fotograflar = $i['fotograflar'] ?? [];
+
     return [
-        'ofis_id'        => 1, // Varsayılan ofis (çok ofisli için ayarlanabilir)
+        'ofis_id'        => 1,
         'baslik'         => mb_substr($i['baslik'] ?? '', 0, 255),
         'aciklama'       => $i['aciklama'] ?? null,
         'fiyat'          => (float)($i['fiyat'] ?? 0),
-        'sehir'          => $i['konum']['il'] ?? '',
-        'ilce'           => $i['konum']['ilce'] ?? null,
-        'mahalle'        => $i['konum']['mahalle'] ?? null,
-        'adres'          => $i['konum']['adres'] ?? null,
+        'sehir'          => $sehir,
+        'ilce'           => $ilce,
+        'mahalle'        => $mahalle,
+        'adres'          => $adres,
         'lat'            => isset($i['konum']['lat']) ? (float)$i['konum']['lat'] : null,
         'lng'            => isset($i['konum']['lng']) ? (float)$i['konum']['lng'] : null,
-        'metrekare'      => (int)($i['ozellikler']['metrekare'] ?? 0) ?: null,
-        'oda_sayisi'     => $i['ozellikler']['oda_sayisi'] ?? null,
-        'kat'            => $i['ozellikler']['kat'] ?? null,
-        'bina_yasi'      => (int)($i['ozellikler']['bina_yasi'] ?? 0) ?: null,
-        'isitma'         => $i['ozellikler']['isitma'] ?? null,
-        'banyo_sayisi'   => isset($i['ozellikler']['banyo_sayisi']) ? (int)$i['ozellikler']['banyo_sayisi'] : null,
-        'ilan_sahibi_tel'=> $i['satici']['telefon'] ?? null,
-        'ilan_sahibi_ad' => $i['satici']['ad'] ?? null,
+        'metrekare'      => $metrekare,
+        'oda_sayisi'     => $oda_sayisi,
+        'kat'            => $kat,
+        'bina_yasi'      => $bina_yasi,
+        'isitma'         => $isitma,
+        'banyo_sayisi'   => $banyo !== null ? (int)$banyo : null,
+        'ilan_sahibi_tel'=> $satici_tel,
+        'ilan_sahibi_ad' => $satici_ad,
         'sahibinden_mi'  => ($i['kaynak_site'] ?? '') === 'sahibinden' ? 1 : 0,
         'kaynak_site'    => $i['kaynak_site'] ?? 'scraper',
         'kaynak_url'     => $i['kaynak_url'] ?? null,
         'kaynak_id'      => $i['kaynak_id'] ?? null,
         'ilan_tipi'      => $i['tip'] ?? 'satilik',
         'emlak_tipi'     => $i['kategori'] ?? 'daire',
-        'fotograflar'    => $i['fotograflar'] ?? [],
-        'sahte_skor'     => (int)($i['analiz']['sahte_skor'] ?? 0),
-        'sahte_sonuc'    => $i['analiz']['sahte_sonuc'] ?? 'gercek',
-        'mukerrer_grup_id' => $i['analiz']['mukerrer_grup_id'] ?? null,
+        'fotograflar'    => $fotograflar,
+        'sahte_skor'     => (int)($i['analiz']['sahte_skor'] ?? $i['sahtelik_skoru'] ?? 0),
+        'sahte_sonuc'    => $i['analiz']['sahte_sonuc'] ?? ($i['muhtemelen_sahte'] ? 'muhtemelen_sahte' : 'gercek'),
+        'mukerrer_grup_id' => $i['analiz']['mukerrer_grup_id'] ?? $i['mukerrer_grup_id'] ?? null,
         'durum'          => 'aktif',
     ];
 }

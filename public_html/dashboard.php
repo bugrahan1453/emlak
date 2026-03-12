@@ -103,7 +103,7 @@ require_once APP_DIR . '/views/layout/header.php';
                     <!-- Thumbnail -->
                     <div class="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0" style="background: rgba(255,255,255,0.05);">
                         <?php if ($foto): ?>
-                        <img src="<?= APP_URL ?>/uploads/fotograflar/<?= e(basename($foto)) ?>" class="w-full h-full object-cover" loading="lazy">
+                        <img src="<?= str_starts_with($foto, 'http') ? e($foto) : APP_URL . '/uploads/fotograflar/' . e(basename($foto)) ?>" class="w-full h-full object-cover" loading="lazy">
                         <?php else: ?>
                         <div class="w-full h-full flex items-center justify-center text-xl">🏠</div>
                         <?php endif; ?>

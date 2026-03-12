@@ -54,12 +54,17 @@ require_once APP_DIR . '/views/layout/header.php';
         <div class="lg:col-span-2 space-y-4">
 
             <!-- Fotoğraf Galerisi -->
-            <?php $fotograflar = is_string($ilan['fotograflar']) ? json_decode($ilan['fotograflar'], true) : ($ilan['fotograflar'] ?? []); ?>
+            <?php
+            $fotograflar = is_string($ilan['fotograflar']) ? json_decode($ilan['fotograflar'], true) : ($ilan['fotograflar'] ?? []);
+            $fotoUrl = function(string $f): string {
+                return str_starts_with($f, 'http') ? e($f) : APP_URL . '/uploads/fotograflar/' . e(basename($f));
+            };
+            ?>
             <?php if (!empty($fotograflar)): ?>
             <div class="rounded-2xl overflow-hidden" style="background: rgba(15,23,62,0.6); border: 1px solid rgba(255,255,255,0.06);">
                 <div class="relative h-72 overflow-hidden cursor-pointer" @click="modalAcik = true">
                     <?php foreach ($fotograflar as $fi => $foto): ?>
-                    <img src="<?= APP_URL ?>/uploads/fotograflar/<?= e(basename($foto)) ?>"
+                    <img src="<?= $fotoUrl($foto) ?>"
                          class="absolute inset-0 w-full h-full object-cover transition-opacity duration-300"
                          :class="aktifFoto === <?= $fi ?> ? 'opacity-100' : 'opacity-0'"
                          loading="lazy">
@@ -79,7 +84,7 @@ require_once APP_DIR . '/views/layout/header.php';
                 </div>
                 <div class="flex gap-2 p-3 overflow-x-auto">
                     <?php foreach ($fotograflar as $fi => $foto): ?>
-                    <img src="<?= APP_URL ?>/uploads/fotograflar/<?= e(basename($foto)) ?>"
+                    <img src="<?= $fotoUrl($foto) ?>"
                          @click="aktifFoto = <?= $fi ?>"
                          :class="aktifFoto === <?= $fi ?> ? 'ring-2 ring-cyan-400 opacity-100' : 'opacity-50 hover:opacity-80'"
                          class="w-16 h-12 rounded-lg object-cover cursor-pointer flex-shrink-0 transition-all"
