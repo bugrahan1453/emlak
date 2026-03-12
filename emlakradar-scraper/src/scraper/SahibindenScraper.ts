@@ -207,17 +207,41 @@ export class SahibindenScraper extends BaseScraper {
 
       const fotograflar: string[] = [];
       const seen = new Set<string>();
+
+      // 1) img tag'lerinden dene
       const fotografEls = document.querySelectorAll(
         '.classifiedDetailMainPhotos img, .swiper-slide img, [class*="photo"] img, [class*="gallery"] img'
       ) as NodeListOf<HTMLImageElement>;
       fotografEls.forEach((img) => {
         const url = img.getAttribute('data-src') || img.getAttribute('data-lazy') || img.src;
         if (url && url.startsWith('http') && !url.includes('no-image') && !url.includes('placeholder')) {
-          // Sahibinden CDN: /800x600/ formatını zorla
           const fullUrl = url.replace(/\/\d+x\d+\//, '/800x600/');
           if (!seen.has(fullUrl)) { seen.add(fullUrl); fotograflar.push(fullUrl); }
         }
       });
+
+      // 2) Script tag'lerindeki JSON'dan çek (FlareSolverr statik HTML için)
+      if (fotograflar.length === 0) {
+        document.querySelectorAll('script').forEach((script) => {
+          const text = script.textContent || '';
+          // Sahibinden foto URL pattern: cdn.dsmcdn.com veya i.emlakkulisi.com vb.
+          const matches = text.matchAll(/"(https?:\/\/(?:cdn\.dsmcdn\.com|i\.emlakkulisi\.com|static\.sahibinden\.com|img\.sahibinden\.com|photos\.sahibinden\.com)[^"]+\.(?:jpg|jpeg|png|webp)[^"]*)"/gi);
+          for (const m of matches) {
+            const url = m[1].replace(/\/\d+x\d+\//, '/800x600/');
+            if (!seen.has(url)) { seen.add(url); fotograflar.push(url); }
+          }
+          // Genel CDN URL pattern backup
+          if (fotograflar.length === 0) {
+            const generic = text.matchAll(/"url"\s*:\s*"(https?:\/\/[^"]+\.(?:jpg|jpeg|png|webp))"/gi);
+            for (const m of generic) {
+              const url = m[1].replace(/\/\d+x\d+\//, '/800x600/');
+              if (!seen.has(url) && !url.includes('logo') && !url.includes('icon')) {
+                seen.add(url); fotograflar.push(url);
+              }
+            }
+          }
+        });
+      }
 
       const ozellikMap: Record<string, string> = {};
       document.querySelectorAll('.classified-properties li').forEach(li => {
