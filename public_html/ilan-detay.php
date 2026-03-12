@@ -57,7 +57,7 @@ require_once APP_DIR . '/views/layout/header.php';
             <?php
             $fotograflar = is_string($ilan['fotograflar']) ? json_decode($ilan['fotograflar'], true) : ($ilan['fotograflar'] ?? []);
             $fotoUrl = function(string $f): string {
-                return str_starts_with($f, 'http') ? e($f) : APP_URL . '/uploads/fotograflar/' . e(basename($f));
+                return (strpos($f, 'http') === 0) ? e($f) : APP_URL . '/uploads/fotograflar/' . e(basename($f));
             };
             ?>
             <?php if (!empty($fotograflar)): ?>

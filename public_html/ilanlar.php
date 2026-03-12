@@ -98,13 +98,14 @@ require_once APP_DIR . '/views/layout/header.php';
         $tabloRows = [];
         foreach ($data['ilanlar']['data'] as $ilan) {
             $foto = is_array($ilan['fotograflar'] ?? null) && !empty($ilan['fotograflar'][0]) ? $ilan['fotograflar'][0] : null;
+            $fotoUrl = $foto ? (strpos($foto, 'http') === 0 ? $foto : APP_URL . '/uploads/fotograflar/' . basename($foto)) : null;
             $tabloRows[] = [
                 // Checkbox
                 '<input type="checkbox" x-model="secili" value="' . (int)$ilan['id'] . '" class="rounded">',
                 // İlan
                 '<div class="flex items-center gap-2">' .
                     '<div class="w-10 h-10 rounded-lg overflow-hidden flex-shrink-0" style="background:rgba(255,255,255,0.05);">' .
-                    ($foto ? '<img src="' . (str_starts_with($foto, 'http') ? e($foto) : APP_URL . '/uploads/fotograflar/' . e(basename($foto))) . '" class="w-full h-full object-cover">' : '<div class="w-full h-full flex items-center justify-center">🏠</div>') .
+                    ($fotoUrl ? '<img src="' . e($fotoUrl) . '" class="w-full h-full object-cover">' : '<div class="w-full h-full flex items-center justify-center">🏠</div>') .
                     '</div>' .
                     '<div><a href="' . APP_URL . '/ilan-detay.php?id=' . (int)$ilan['id'] . '" class="text-sm hover:text-cyan-400 transition-colors" style="color:#e8ecf4;">' . e(truncate($ilan['baslik'], 50)) . '</a>' .
                     '<p class="text-xs" style="color:#7a8599;">' . e($ilan['danisman_ad'] ?? 'Atanmamış') . '</p></div></div>',
