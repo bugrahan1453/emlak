@@ -37,7 +37,9 @@ export class SahibindenScraper extends BaseScraper {
     const page = await this.newPage();
 
     try {
-      const ilkUrl = `${this.baseUrl}${yol}`;
+      // usertype=0 → sadece bireysel (sahibinden) ilanlar, emlakçı değil
+      const baseParams = 'usertype=0';
+      const ilkUrl = `${this.baseUrl}${yol}?${baseParams}`;
       await this.navigateWithFlareSolverr(page, ilkUrl);
 
       // Toplam sayfa sayısını bul
@@ -47,7 +49,9 @@ export class SahibindenScraper extends BaseScraper {
       this.logger.info(`${tip} — ${taranacakSayfa} sayfa taranacak`);
 
       for (let sayfa = 1; sayfa <= taranacakSayfa; sayfa++) {
-        const sayfaUrl = sayfa === 1 ? ilkUrl : `${ilkUrl}?pagingOffset=${(sayfa - 1) * ITEMS_PER_PAGE}`;
+        const sayfaUrl = sayfa === 1
+          ? ilkUrl
+          : `${this.baseUrl}${yol}?${baseParams}&pagingOffset=${(sayfa - 1) * ITEMS_PER_PAGE}`;
 
         if (sayfa > 1) {
           await this.navigateWithFlareSolverr(page, sayfaUrl);
@@ -76,6 +80,13 @@ export class SahibindenScraper extends BaseScraper {
 
   private async parseSayfaIlanlar(page: Page, tip: 'satilik' | 'kiralik'): Promise<IlanVeri[]> {
     return page.evaluate((baseUrl: string, tip: string) => {
+      const TURK_AYLAR: Record<string, number> = {
+        'ocak': 0, 'şubat': 1, 'mart': 2, 'nisan': 3, 'mayıs': 4, 'haziran': 5,
+        'temmuz': 6, 'ağustos': 7, 'eylül': 8, 'ekim': 9, 'kasım': 10, 'aralık': 11,
+      };
+      const otuzGunOnce = new Date();
+      otuzGunOnce.setDate(otuzGunOnce.getDate() - 30);
+
       const ilanlar: IlanVeri[] = [];
       const satirlar = document.querySelectorAll('tr.searchResultsItem');
 
@@ -84,8 +95,9 @@ export class SahibindenScraper extends BaseScraper {
           const id = satir.getAttribute('data-id') || '';
           if (!id) return;
 
-          // Emlakçı (mağaza) ilanlarını atla — sadece bireysel ilanlar
-          if (satir.querySelector('.store-icon, .titleIcon.store-icon')) return;
+          // usertype=0 URL parametresi zaten emlakçıları filtreler,
+          // ek güvenlik için store-icon kontrolü
+          if (satir.querySelector('.store-icon')) return;
 
           const baslikEl = satir.querySelector('.classifiedTitle');
           const baslik = baslikEl?.textContent?.trim() || '';
@@ -113,7 +125,21 @@ export class SahibindenScraper extends BaseScraper {
           const fotografUrl = fotografEl?.getAttribute('src') || fotografEl?.getAttribute('data-src') || '';
 
           const tarihEl = satir.querySelector('.searchResultsDateValue');
-          const tarih = tarihEl?.textContent?.trim() || '';
+          const tarihSpanlar = tarihEl?.querySelectorAll('span') || [];
+          const gun = tarihSpanlar[0]?.textContent?.trim() || '';
+          const yil = tarihSpanlar[1]?.textContent?.trim() || '';
+          const tarih = gun && yil ? `${gun} ${yil}` : (tarihEl?.textContent?.trim() || '');
+
+          // 30 günlük filtre: "12 Mart 2026" → Date
+          if (gun && yil) {
+            const parcalar = gun.split(' ');
+            const ayAdi = (parcalar[1] || '').toLowerCase();
+            const ayNo = TURK_AYLAR[ayAdi];
+            if (ayNo !== undefined) {
+              const ilanTarihi = new Date(parseInt(yil), ayNo, parseInt(parcalar[0]));
+              if (ilanTarihi < otuzGunOnce) return; // 30 günden eski → atla
+            }
+          }
 
           const ilan: IlanVeri = {
             kaynak_site: 'sahibinden',
