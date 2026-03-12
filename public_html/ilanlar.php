@@ -98,7 +98,7 @@ require_once APP_DIR . '/views/layout/header.php';
         $tabloRows = [];
         foreach ($data['ilanlar']['data'] as $ilan) {
             $foto = is_array($ilan['fotograflar'] ?? null) && !empty($ilan['fotograflar'][0]) ? $ilan['fotograflar'][0] : null;
-            $fotoUrl = $foto ? (strpos($foto, 'http') === 0 ? $foto : APP_URL . '/uploads/fotograflar/' . basename($foto)) : null;
+            $fotoUrl = $foto ? (strpos($foto, 'http') === 0 ? APP_URL . '/api/img-proxy.php?url=' . urlencode($foto) : APP_URL . '/uploads/fotograflar/' . basename($foto)) : null;
             $tabloRows[] = [
                 // Checkbox
                 '<input type="checkbox" x-model="secili" value="' . (int)$ilan['id'] . '" class="rounded">',
