@@ -24,6 +24,7 @@ export interface FlareResult {
   cookies: FlareCookie[];
   userAgent: string;
   status: number;
+  html: string;
 }
 
 /**
@@ -50,6 +51,7 @@ export async function solveCloudflare(url: string): Promise<FlareResult | null> 
         cookies: sol.cookies ?? [],
         userAgent: sol.userAgent ?? '',
         status: sol.status,
+        html: sol.response ?? '',
       };
     }
 

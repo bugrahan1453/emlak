@@ -33,7 +33,7 @@ export class SahibindenScraper extends BaseScraper {
 
     try {
       const ilkUrl = `${this.baseUrl}${yol}`;
-      await this.navigateTo(page, ilkUrl);
+      await this.navigateWithFlareSolverr(page, ilkUrl);
 
       // Toplam sayfa sayısını bul
       const toplamSayfa = await this.getTotalPages(page);
@@ -45,7 +45,7 @@ export class SahibindenScraper extends BaseScraper {
         const sayfaUrl = sayfa === 1 ? ilkUrl : `${ilkUrl}?pagingOffset=${(sayfa - 1) * ITEMS_PER_PAGE}`;
 
         if (sayfa > 1) {
-          await this.navigateTo(page, sayfaUrl);
+          await this.navigateWithFlareSolverr(page, sayfaUrl);
         }
 
         await this.scrollPage(page);

@@ -134,9 +134,34 @@ export abstract class BaseScraper {
     await page.setCookie(...puppeteerCookies);
     await page.setUserAgent(result.userAgent);
 
-    // Cookie'leri set ettikten sonra tekrar git
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    // FlareSolverr'ın getirdiği HTML'i direkt yükle (tekrar navigate etme)
+    if (result.html) {
+      await page.setContent(result.html, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    } else {
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    }
     this.logger.info(`CF bypass tamamlandı: ${url}`);
+  }
+
+  /**
+   * FlareSolverr üzerinden HTML alır, page.setContent() ile Puppeteer'a yükler.
+   * Sahibinden gibi bot tespiti yapan siteler için kullanılır.
+   */
+  protected async navigateWithFlareSolverr(page: Page, url: string, waitMs?: [number, number]): Promise<void> {
+    this.logger.info(`FlareSolverr ile yükleniyor: ${url}`);
+    const result = await solveCloudflare(url);
+
+    if (!result || !result.html) {
+      this.logger.warn('FlareSolverr başarısız, normal navigasyon deneniyor');
+      await this.navigateTo(page, url, waitMs);
+      return;
+    }
+
+    await page.setContent(result.html, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    this.logger.info(`FlareSolverr HTML yüklendi (${result.html.length} byte): ${url}`);
+
+    const [min, max] = waitMs ?? [config.scraper.delayMin, config.scraper.delayMax];
+    await randomDelay(min, max);
   }
 
   /**
