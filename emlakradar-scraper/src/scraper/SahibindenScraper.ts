@@ -56,6 +56,29 @@ export class SahibindenScraper extends BaseScraper {
         }
 
         await this.scrollPage(page);
+
+        // Debug: sayfada hangi elementler var?
+        const debugInfo = await page.evaluate(() => {
+          const counts: Record<string, number> = {};
+          const selectors = [
+            'tr.searchResultsItem', '.classifiedTitle', 'tr[data-id]',
+            '[class*="classified"]', '[class*="listing"]', '[class*="result"]',
+            'tr[id]', 'table', 'tbody tr', '[data-id]',
+          ];
+          for (const sel of selectors) {
+            counts[sel] = document.querySelectorAll(sel).length;
+          }
+          counts['body_length'] = document.body?.innerHTML?.length ?? 0;
+          const title = document.title;
+          const firstClasses = Array.from(document.querySelectorAll('*'))
+            .slice(0, 100)
+            .map(el => el.className)
+            .filter(c => typeof c === 'string' && c.includes('search'))
+            .slice(0, 5);
+          return { counts, title, firstClasses };
+        });
+        this.logger.info(`Debug sayfa yapısı: ${JSON.stringify(debugInfo)}`);
+
         const ilanlar = await this.parseSayfaIlanlar(page, tip);
 
         // Her ilan için detay sayfasından tüm foto + ek bilgileri çek

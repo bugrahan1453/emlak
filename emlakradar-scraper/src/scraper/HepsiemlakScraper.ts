@@ -41,6 +41,24 @@ export class HepsiemlakScraper extends BaseScraper {
         if (sayfa > 1) await this.navigateTo(page, sayfaUrl);
 
         await this.scrollPage(page);
+
+        // Debug: sayfada hangi elementler var?
+        const debugInfo = await page.evaluate(() => {
+          const counts: Record<string, number> = {};
+          const selectors = [
+            '.listing-item', '.listing-item-v2', '[data-id]', '[data-listing-id]',
+            '[data-cid]', 'a[href*="/ilan/"]', 'a[href*="/emlak/"]',
+            '[class*="listing"]', '[class*="card"]', '[class*="result"]',
+          ];
+          for (const sel of selectors) {
+            counts[sel] = document.querySelectorAll(sel).length;
+          }
+          counts['body_length'] = document.body?.innerHTML?.length ?? 0;
+          const title = document.title;
+          return { counts, title };
+        });
+        this.logger.info(`Debug Hepsiemlak sayfa yapısı: ${JSON.stringify(debugInfo)}`);
+
         const ilanlar = await this.parseSayfa(page, tip);
 
         // Her ilan için detay sayfasından tüm fotoları çek
