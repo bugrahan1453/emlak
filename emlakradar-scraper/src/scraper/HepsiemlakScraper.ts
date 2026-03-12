@@ -118,36 +118,85 @@ export class HepsiemlakScraper extends BaseScraper {
   private async parseSayfa(page: Page, tip: 'satilik' | 'kiralik'): Promise<IlanVeri[]> {
     return page.evaluate((baseUrl: string, tip: string) => {
       const ilanlar: IlanVeri[] = [];
-      const kartlar = document.querySelectorAll('[data-id], .listing-item, .he-item');
+
+      // Hepsiemlak çeşitli sürümlerde farklı sınıf isimleri kullanır
+      const selGruplar = [
+        '.listing-item',
+        '.listing-item-v2',
+        'li[data-id]',
+        'article[data-id]',
+        '[data-listing-id]',
+        '[data-cid]',
+        '.he-listing',
+        '.search-results-item',
+      ];
+
+      let kartlar: NodeListOf<Element> | null = null;
+      for (const sel of selGruplar) {
+        const found = document.querySelectorAll(sel);
+        if (found.length > 2) { kartlar = found; break; }
+      }
+
+      // Hiç bulunamazsa sayfadaki tüm ilan linklerini dene
+      if (!kartlar || kartlar.length === 0) {
+        kartlar = document.querySelectorAll('a[href*="/ilan/"]');
+      }
 
       kartlar.forEach((kart: Element) => {
         try {
-          const id = kart.getAttribute('data-id') || kart.getAttribute('data-listing-id') || '';
-          if (!id) return;
+          // ID: data-id, data-listing-id, data-cid veya URL'den
+          let id = kart.getAttribute('data-id')
+            || kart.getAttribute('data-listing-id')
+            || kart.getAttribute('data-cid')
+            || '';
 
-          const baslikEl = kart.querySelector('h2 a, .listing-card-title a, .he-title');
-          const baslik = baslikEl?.textContent?.trim() || '';
-          const href = baslikEl?.getAttribute('href') || '';
+          // Başlık bağlantısını bul
+          const baslikEl = kart.querySelector(
+            'h2 a, h3 a, .listing-card-title a, .listing-title a, .he-title a, a[title]'
+          ) || (kart.tagName === 'A' ? kart : null);
+          const baslik = baslikEl?.textContent?.trim() || (baslikEl as HTMLAnchorElement | null)?.title || '';
+
+          const href = (baslikEl as HTMLAnchorElement | null)?.getAttribute('href')
+            || (kart.tagName === 'A' ? (kart as HTMLAnchorElement).getAttribute('href') : '')
+            || '';
+
+          // ID yoksa URL'den çıkar
+          if (!id && href) {
+            const m = href.match(/\/([a-zA-Z0-9-]+-(\d+))(?:\/|\?|$)/);
+            id = m ? m[2] : '';
+          }
+          if (!id || !baslik) return;
+
           const kaynak_url = href.startsWith('http') ? href : baseUrl + href;
 
-          const fiyatEl = kart.querySelector('.listing-price, .he-price, [class*="price"]');
+          const fiyatEl = kart.querySelector(
+            '.listing-price, .he-price, [class*="price"], [class*="fiyat"]'
+          );
           const fiyatText = fiyatEl?.textContent?.trim() || '';
-          const fiyat = parseFloat(fiyatText.replace(/[^\d,]/g, '').replace(',', '.')) || null;
+          // Türkçe format: 2.500.000 TL
+          const fiyat = parseFloat(fiyatText.replace(/\./g, '').replace(',', '.').replace(/[^0-9.]/g, '')) || null;
 
-          const lokasyonEl = kart.querySelector('.listing-location, .he-location');
-          const lokasyonParcalar = (lokasyonEl?.textContent?.trim() || '').split('/').map((s: string) => s.trim());
+          const lokasyonEl = kart.querySelector(
+            '.listing-location, .he-location, [class*="location"], [class*="adres"], [class*="konum"]'
+          );
+          const lokasyonMetin = lokasyonEl?.textContent?.trim() || '';
+          const lokasyonParcalar = lokasyonMetin.split(/[\/,]/).map((s: string) => s.trim()).filter(Boolean);
 
-          const m2El = kart.querySelector('[class*="m2"], [class*="area"], [class*="size"]');
+          const m2El = kart.querySelector('[class*="m2"], [class*="meter"], [class*="area"], [class*="size"]');
           const m2Text = m2El?.textContent?.trim() || '';
-          const metrekare = parseFloat(m2Text.replace(/[^\d,]/g, '').replace(',', '.')) || null;
+          const metrekare = parseFloat(m2Text.replace(/\./g, '').replace(',', '.').replace(/[^0-9.]/g, '')) || null;
 
-          const odaEl = kart.querySelector('[class*="room"], [class*="oda"]');
+          const odaEl = kart.querySelector('[class*="room"], [class*="oda"], [class*="bedroom"]');
           const odaText = odaEl?.textContent?.trim() || null;
 
-          const fotografEl = kart.querySelector('img[src*="hepsiemlak"], img[data-src]') as HTMLImageElement | null;
-          const fotografUrl = fotografEl?.getAttribute('data-src') || fotografEl?.src || '';
+          const fotografEl = kart.querySelector('img') as HTMLImageElement | null;
+          const fotografUrl = fotografEl?.getAttribute('data-src')
+            || fotografEl?.getAttribute('data-lazy')
+            || fotografEl?.getAttribute('data-original')
+            || fotografEl?.src
+            || '';
 
-          const tarihEl = kart.querySelector('[class*="date"], [class*="tarih"]');
+          const tarihEl = kart.querySelector('[class*="date"], [class*="tarih"], time');
           const tarih = tarihEl?.textContent?.trim() || '';
 
           ilanlar.push({
@@ -163,10 +212,10 @@ export class HepsiemlakScraper extends BaseScraper {
             sehir: lokasyonParcalar[0] || '',
             ilce: lokasyonParcalar[1] || '',
             mahalle: lokasyonParcalar[2] || '',
-            adres: lokasyonParcalar.join(', '),
+            adres: lokasyonMetin,
             metrekare: metrekare ?? undefined,
             oda_sayisi: odaText ?? undefined,
-            fotograflar: fotografUrl ? [fotografUrl] : [],
+            fotograflar: fotografUrl && fotografUrl.startsWith('http') ? [fotografUrl] : [],
             ilan_tarihi: tarih || undefined,
             taranan_at: new Date().toISOString(),
           });

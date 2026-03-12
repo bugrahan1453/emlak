@@ -225,15 +225,25 @@ export class SahibindenScraper extends BaseScraper {
         document.querySelectorAll('script').forEach((script) => {
           const text = script.textContent || '';
           // Sahibinden foto URL pattern: cdn.dsmcdn.com veya i.emlakkulisi.com vb.
-          const matches = text.matchAll(/"(https?:\/\/(?:cdn\.dsmcdn\.com|i\.emlakkulisi\.com|static\.sahibinden\.com|img\.sahibinden\.com|photos\.sahibinden\.com)[^"]+\.(?:jpg|jpeg|png|webp)[^"]*)"/gi);
+          const matches = text.matchAll(/"(https?:\/\/(?:cdn\.dsmcdn\.com|i\.emlakkulisi\.com|static\.sahibinden\.com|img\.sahibinden\.com|photos\.sahibinden\.com|cdn\.sahibinden\.com|uploads\.sahibinden\.com|sahibinden-prod\.s3[^"]*\.amazonaws\.com)[^"]+\.(?:jpg|jpeg|png|webp)[^"]*)"/gi);
           for (const m of matches) {
             const url = m[1].replace(/\/\d+x\d+\//, '/800x600/');
             if (!seen.has(url)) { seen.add(url); fotograflar.push(url); }
           }
-          // Genel CDN URL pattern backup
+          // Genel CDN URL pattern backup: "url", "src", "image" key'leri
           if (fotograflar.length === 0) {
-            const generic = text.matchAll(/"url"\s*:\s*"(https?:\/\/[^"]+\.(?:jpg|jpeg|png|webp))"/gi);
+            const generic = text.matchAll(/"(?:url|src|image|photo|thumbnail)"\s*:\s*"(https?:\/\/[^"]+\.(?:jpg|jpeg|png|webp))"/gi);
             for (const m of generic) {
+              const url = m[1].replace(/\/\d+x\d+\//, '/800x600/');
+              if (!seen.has(url) && !url.includes('logo') && !url.includes('icon') && !url.includes('avatar')) {
+                seen.add(url); fotograflar.push(url);
+              }
+            }
+          }
+          // Son çare: sahibinden.com içeren tüm .jpg/.png URL'leri
+          if (fotograflar.length === 0) {
+            const anyMatch = text.matchAll(/"(https?:\/\/[^"]*sahibinden[^"]+\.(?:jpg|jpeg|png|webp)[^"]*)"/gi);
+            for (const m of anyMatch) {
               const url = m[1].replace(/\/\d+x\d+\//, '/800x600/');
               if (!seen.has(url) && !url.includes('logo') && !url.includes('icon')) {
                 seen.add(url); fotograflar.push(url);

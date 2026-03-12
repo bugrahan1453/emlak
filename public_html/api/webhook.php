@@ -314,6 +314,9 @@ function fotografIndir(array $urls): array {
         if ($data && $httpCode === 200 && strlen($data) > 1000) {
             file_put_contents($hedef, $data);
             $lokal[] = $filename;
+        } else {
+            // İndirme başarısız → orijinal URL'yi yedek olarak sakla (img-proxy ile gösterilecek)
+            $lokal[] = $url;
         }
     }
 
@@ -332,7 +335,7 @@ function mapIlanData(array $i): array {
     $oda_sayisi = $i['ozellikler']['oda_sayisi'] ?? $i['oda_sayisi'] ?? null;
     $kat        = $i['ozellikler']['kat']        ?? $i['kat']        ?? null;
     $bina_yasi  = (int)($i['ozellikler']['bina_yasi']  ?? $i['bina_yasi']  ?? 0) ?: null;
-    $isitma     = $i['ozellikler']['isitma']     ?? $i['isitma']     ?? null;
+    $isitma     = $i['ozellikler']['isitma_tipi'] ?? $i['ozellikler']['isitma'] ?? $i['isitma_tipi'] ?? $i['isitma'] ?? null;
     $banyo      = $i['ozellikler']['banyo_sayisi'] ?? $i['banyo_sayisi'] ?? null;
 
     $satici_tel = $i['satici']['telefon'] ?? $i['satici_tel'] ?? null;
@@ -355,7 +358,7 @@ function mapIlanData(array $i): array {
         'oda_sayisi'     => $oda_sayisi,
         'kat'            => $kat,
         'bina_yasi'      => $bina_yasi,
-        'isitma'         => $isitma,
+        'isitma_tipi'    => $isitma,
         'banyo_sayisi'   => $banyo !== null ? (int)$banyo : null,
         'ilan_sahibi_tel'=> $satici_tel,
         'ilan_sahibi_ad' => $satici_ad,
