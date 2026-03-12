@@ -14,17 +14,22 @@ export class SahibindenScraper extends BaseScraper {
   get kaynakAdi(): string { return 'Sahibinden'; }
   get baseUrl(): string { return 'https://www.sahibinden.com'; }
 
-  // Satılık daire + kiralık daire kategorileri
-  private readonly KATEGORILER = [
-    { url: '/satilik-daire', tip: 'satilik' as const },
-    { url: '/kiralik-daire', tip: 'kiralik' as const },
-  ];
-
   async scrape(): Promise<void> {
-    for (const kategori of this.KATEGORILER) {
-      await this.scrapeKategori(kategori.url, kategori.tip);
-      // Kategoriler arası bekleme
-      await new Promise(r => setTimeout(r, config.scraper.delayMax));
+    const cities = config.scraper.cities; // ['istanbul', 'canakkale', ...]
+    const kategoriler = [
+      { yol: 'satilik-daire', tip: 'satilik' as const },
+      { yol: 'kiralik-daire', tip: 'kiralik' as const },
+    ];
+
+    for (const kat of kategoriler) {
+      for (const city of cities) {
+        // istanbul için /satilik-daire, diğerleri için /satilik-daire/canakkale
+        const cityYol = city === 'istanbul'
+          ? `/${kat.yol}`
+          : `/${kat.yol}/${city}`;
+        await this.scrapeKategori(cityYol, kat.tip);
+        await new Promise(r => setTimeout(r, config.scraper.delayMax));
+      }
     }
   }
 
@@ -79,6 +84,9 @@ export class SahibindenScraper extends BaseScraper {
           const id = satir.getAttribute('data-id') || '';
           if (!id) return;
 
+          // Emlakçı (mağaza) ilanlarını atla — sadece bireysel ilanlar
+          if (satir.querySelector('.store-icon, .titleIcon.store-icon')) return;
+
           const baslikEl = satir.querySelector('.classifiedTitle');
           const baslik = baslikEl?.textContent?.trim() || '';
           const href = baslikEl?.getAttribute('href') || '';
@@ -86,7 +94,8 @@ export class SahibindenScraper extends BaseScraper {
 
           const fiyatEl = satir.querySelector('td.searchResultsPriceValue span');
           const fiyatText = fiyatEl?.textContent?.trim() || '';
-          const fiyat = parseFloat(fiyatText.replace(/[^\d.]/g, '').replace(',', '.')) || null;
+          // Türkçe format: 5.599.999 TL → noktaları kaldır, virgülü nokta yap
+          const fiyat = parseFloat(fiyatText.replace(/\./g, '').replace(',', '.').replace(/[^0-9.]/g, '')) || null;
 
           const lokasyonEl = satir.querySelector('td.searchResultsLocationValue');
           const lokasyonHtml = lokasyonEl?.innerHTML || '';
@@ -94,12 +103,14 @@ export class SahibindenScraper extends BaseScraper {
 
           const attrCells = satir.querySelectorAll('td.searchResultsAttributeValue');
           const m2Text = attrCells[0]?.textContent?.trim() || '';
-          const metrekare = parseFloat(m2Text.replace(/[^\d,]/g, '').replace(',', '.')) || null;
+          // m² Türkçe format: nokta=binlik, virgül=ondalık
+          const metrekare = parseFloat(m2Text.replace(/\./g, '').replace(',', '.').replace(/[^0-9.]/g, '')) || null;
 
           const odaText = attrCells[1]?.textContent?.trim() || '';
 
-          const fotografEl = satir.querySelector('td.searchResultsLargeThumbnail img') as HTMLImageElement | null;
-          const fotografUrl = fotografEl?.src || fotografEl?.getAttribute('data-src') || '';
+          // getAttribute kullan — setContent bağlamında img.src about:blank'e göre resolve olabilir
+          const fotografEl = satir.querySelector('td.searchResultsLargeThumbnail img');
+          const fotografUrl = fotografEl?.getAttribute('src') || fotografEl?.getAttribute('data-src') || '';
 
           const tarihEl = satir.querySelector('.searchResultsDateValue');
           const tarih = tarihEl?.textContent?.trim() || '';
