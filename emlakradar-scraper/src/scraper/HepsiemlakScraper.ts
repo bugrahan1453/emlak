@@ -42,6 +42,22 @@ export class HepsiemlakScraper extends BaseScraper {
 
         await this.scrollPage(page);
         const ilanlar = await this.parseSayfa(page, tip);
+
+        // Her ilan için detay sayfasından tüm fotoları çek
+        const detayPage = await this.newPage();
+        try {
+          for (const ilan of ilanlar) {
+            if (ilan.kaynak_url) {
+              const detay = await this.fetchHepsiemlakDetay(detayPage, ilan.kaynak_url);
+              if (detay.fotograflar && detay.fotograflar.length > 0) {
+                ilan.fotograflar = detay.fotograflar;
+              }
+            }
+          }
+        } finally {
+          await detayPage.close();
+        }
+
         await this.processIlanlar(ilanlar);
 
         this.logger.info(`Hepsiemlak sayfa ${sayfa}/${taranacak}: ${ilanlar.length} ilan`);
@@ -58,6 +74,44 @@ export class HepsiemlakScraper extends BaseScraper {
       return Math.ceil(sayi / ITEMS_PER_PAGE);
     } catch {
       return 1;
+    }
+  }
+
+  private async fetchHepsiemlakDetay(page: Page, url: string): Promise<{ fotograflar: string[] }> {
+    try {
+      await this.navigateTo(page, url, [1500, 3000]);
+      await this.scrollPage(page);
+
+      return await page.evaluate(() => {
+        const fotograflar: string[] = [];
+        const selectors = [
+          '.he-photos img',
+          '.listing-gallery img',
+          '.swiper-slide img',
+          '[class*="photo"] img',
+          '[class*="gallery"] img',
+          '[class*="slider"] img',
+        ];
+
+        for (const sel of selectors) {
+          document.querySelectorAll<HTMLImageElement>(sel).forEach((img) => {
+            const url = img.getAttribute('data-src') || img.getAttribute('data-lazy') || img.src;
+            if (url && url.startsWith('http') && !url.includes('no-image') && !url.includes('placeholder')) {
+              // Thumbnail URL'ini full-size'a çevir (hepsiemlak CDN pattern)
+              const fullUrl = url
+                .replace(/\/unsafe\/\d+x\d+\//, '/unsafe/1024x768/')
+                .replace(/[?&](width|w)=\d+/, '')
+                .replace(/[?&](height|h)=\d+/, '');
+              if (!fotograflar.includes(fullUrl)) fotograflar.push(fullUrl);
+            }
+          });
+          if (fotograflar.length > 0) break;
+        }
+
+        return { fotograflar };
+      }) as { fotograflar: string[] };
+    } catch {
+      return { fotograflar: [] };
     }
   }
 
