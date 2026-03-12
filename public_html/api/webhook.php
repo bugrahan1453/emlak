@@ -274,6 +274,52 @@ switch ($tip) {
         exit;
 }
 
+// ── Yardımcı: Dış fotoğraf URL'lerini sunucuya indir ──────────────────────
+function fotografIndir(array $urls): array {
+    $uploadDir = dirname(__DIR__) . '/uploads/fotograflar/';
+    $lokal = [];
+
+    foreach (array_slice($urls, 0, 10) as $url) { // max 10 foto
+        if (strpos($url, 'http') !== 0) {
+            $lokal[] = $url; // zaten lokal
+            continue;
+        }
+
+        $ext = strtolower(pathinfo(parse_url($url, PHP_URL_PATH), PATHINFO_EXTENSION));
+        if (!in_array($ext, ['jpg', 'jpeg', 'png', 'webp'])) $ext = 'jpg';
+
+        $filename = 'scraper_' . md5($url) . '.' . $ext;
+        $hedef    = $uploadDir . $filename;
+
+        // Zaten indirilmişse tekrar indirme
+        if (file_exists($hedef)) {
+            $lokal[] = $filename;
+            continue;
+        }
+
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_MAXREDIRS      => 3,
+            CURLOPT_TIMEOUT        => 15,
+            CURLOPT_USERAGENT      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            CURLOPT_REFERER        => parse_url($url, PHP_URL_SCHEME) . '://' . parse_url($url, PHP_URL_HOST) . '/',
+            CURLOPT_SSL_VERIFYPEER => false,
+        ]);
+        $data     = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($data && $httpCode === 200 && strlen($data) > 1000) {
+            file_put_contents($hedef, $data);
+            $lokal[] = $filename;
+        }
+    }
+
+    return $lokal;
+}
+
 // ── Yardımcı: Scraper verisini DB formatına çevir ─────────────────────────
 function mapIlanData(array $i): array {
     // Flat (scraper) veya nested (eski format) her ikisini de destekle
@@ -292,7 +338,7 @@ function mapIlanData(array $i): array {
     $satici_tel = $i['satici']['telefon'] ?? $i['satici_tel'] ?? null;
     $satici_ad  = $i['satici']['ad']      ?? $i['satici_ad']  ?? null;
 
-    $fotograflar = $i['fotograflar'] ?? [];
+    $fotograflar = fotografIndir($i['fotograflar'] ?? []);
 
     return [
         'ofis_id'        => 1,
