@@ -61,9 +61,11 @@ define('WHATSAPP_API_URL',  getenv('WHATSAPP_API_URL')  ?: '');
 define('WHATSAPP_TOKEN',    getenv('WHATSAPP_TOKEN')    ?: '');
 define('WHATSAPP_PHONE_ID', getenv('WHATSAPP_PHONE_ID') ?: '');
 
-// VPS Webhook
-define('VPS_WEBHOOK_TOKEN', getenv('VPS_WEBHOOK_TOKEN') ?: 'emlakradar_webhook_secret_2024');
-define('VPS_BASE_URL',      getenv('VPS_BASE_URL')      ?: '');
+// VPS / Extension Webhook
+define('VPS_WEBHOOK_TOKEN',  getenv('VPS_WEBHOOK_TOKEN')  ?: 'emlakradar_webhook_secret_2024');
+define('VPS_WEBHOOK_SECRET', getenv('VPS_WEBHOOK_SECRET') ?: 'HetagScraper2024!xK9mPqR7wZn');
+define('VPS_ALLOWED_IPS',    getenv('VPS_ALLOWED_IPS')    ?: ''); // boş = herkese açık (extension için)
+define('VPS_BASE_URL',       getenv('VPS_BASE_URL')       ?: '');
 
 // CSRF token uzunluğu
 define('CSRF_TOKEN_LENGTH', 32);
