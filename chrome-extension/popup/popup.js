@@ -93,6 +93,14 @@ $('save-btn').addEventListener('click', () => {
   });
 });
 
+// ─── Önbelleği Temizle ────────────────────────────────────────────────────────
+$('clear-btn').addEventListener('click', () => {
+  if (!confirm('Tüm "görüldü" kayıtları silinecek. Bir sonraki taramada tüm ilanlar yeniden çekilir. Devam?')) return;
+  chrome.storage.local.remove('seenIds', () => {
+    setLog('Önbellek temizlendi — şimdi tara butonuna basın', 'ok');
+  });
+});
+
 // ─── Şimdi Tara ───────────────────────────────────────────────────────────────
 $('scrape-btn').addEventListener('click', () => {
   const btn = $('scrape-btn');
