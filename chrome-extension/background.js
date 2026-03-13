@@ -302,24 +302,31 @@ function injectOnce(tabId, job) {
 }
 
 // ─── Detay Sayfası Scraper ────────────────────────────────────────────────────
+const MAX_DETAIL_PER_RUN = 20; // Tek seferde en fazla 20 detay sayfası aç
+
 async function scrapeDetails(tabId, ilanlar, site) {
   const detailFn = getDetailFn(site);
-  if (!detailFn) return ilanlar; // Detay scripti yoksa olduğu gibi döndür
+  if (!detailFn) return ilanlar;
+
+  // Çok fazla yeni ilan varsa ilk MAX_DETAIL_PER_RUN tanesini detayla çek,
+  // kalanları detaysız (liste verisiyle) kaydet — sıradaki taramada detaylanır
+  const detayliIlanlar  = ilanlar.slice(0, MAX_DETAIL_PER_RUN);
+  const detaysizIlanlar = ilanlar.slice(MAX_DETAIL_PER_RUN);
 
   const zengin = [];
-  for (const ilan of ilanlar) {
+  let idx = 0;
+  for (const ilan of detayliIlanlar) {
+    idx++;
+    sendProgress(`${site} detay ${idx}/${detayliIlanlar.length}: ${ilan.baslik?.slice(0, 40)}...`);
     if (!ilan.kaynak_url) { zengin.push(ilan); continue; }
     try {
       await navigateTab(tabId, ilan.kaynak_url);
-      // Bot bloğu kontrolü
       if (await checkBotBlock(tabId)) {
         sendProgress('⚠️ Bot bloğu (detay) — 5 dk bekleniyor', 'error');
         await sleep(5 * 60 * 1000);
         zengin.push(ilan); continue;
       }
       const detail = await injectDetail(tabId, detailFn);
-
-      // Temel veriyi detay verisi ile zenginleştir
       zengin.push({
         ...ilan,
         aciklama:    detail.aciklama   || ilan.aciklama || '',
@@ -338,9 +345,11 @@ async function scrapeDetails(tabId, ilanlar, site) {
       console.warn('[EmlakRadar] Detay hatası:', ilan.kaynak_url, err.message);
       zengin.push(ilan);
     }
-    // Detay sayfaları arası: 5–10 saniye
-    await sleep(5000 + Math.random() * 5000);
+    await sleep(4000 + Math.random() * 4000);
   }
+
+  // Detay çekilemeyen ilanları olduğu gibi ekle (sıradaki taramada yakalanır)
+  zengin.push(...detaysizIlanlar);
   return zengin;
 }
 
@@ -351,7 +360,7 @@ function injectDetail(tabId, fn) {
       if (done) return; done = true;
       chrome.runtime.onMessage.removeListener(onMsg);
       resolve({});
-    }, 30000);
+    }, 90000); // 90 saniye — humanScroll + sayfa yükleme için yeterli
 
     function onMsg(msg, sender) {
       if (sender.tab?.id !== tabId || msg.type !== 'emlakradar_detail') return;
@@ -761,9 +770,16 @@ async function sahibindenDetailScript() {
 
   // ─── Sayfa yüklensin ────────────────────────────────────────────────────────
   await waitFor('h1.classifiedDetailTitle, h1[class*="title"], .classifiedDetailMainPhoto', 25000);
-  await new Promise(r => setTimeout(r, 1000)); // JS render tamamlansın
-  await humanScroll();
-  await new Promise(r => setTimeout(r, 500)); // Lazy load tetiklensin
+  await new Promise(r => setTimeout(r, 1500)); // JS render tamamlansın
+
+  // Lazy load tetiklemek için hızlı scroll (bot algısı için değil, sadece görüntü yükleme)
+  const pageH = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+  for (let y = 0; y < pageH; y += 300) {
+    window.scrollTo(0, y);
+    await new Promise(r => setTimeout(r, 80));
+  }
+  window.scrollTo(0, 0);
+  await new Promise(r => setTimeout(r, 800)); // Lazy load tamamlansın
 
   // ─── 1. FOTOĞRAFLAR — 4 farklı yöntemle al, en iyisini kullan ──────────────
   const seen = new Set();
@@ -931,8 +947,11 @@ async function hepsiemlakDetailScript() {
   }
 
   await waitFor();
-  await new Promise(r => setTimeout(r, 800));
-  await humanScroll();
+  await new Promise(r => setTimeout(r, 1500));
+
+  const pageH2 = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+  for (let y = 0; y < pageH2; y += 300) { window.scrollTo(0, y); await new Promise(r => setTimeout(r, 80)); }
+  window.scrollTo(0, 0); await new Promise(r => setTimeout(r, 800));
 
   // Açıklama
   const aciklama = (
@@ -1017,8 +1036,11 @@ async function emlakjetDetailScript() {
   }
 
   await waitFor();
-  await new Promise(r => setTimeout(r, 800));
-  await humanScroll();
+  await new Promise(r => setTimeout(r, 1500));
+
+  const pageH3 = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+  for (let y = 0; y < pageH3; y += 300) { window.scrollTo(0, y); await new Promise(r => setTimeout(r, 80)); }
+  window.scrollTo(0, 0); await new Promise(r => setTimeout(r, 800));
 
   const aciklama = (
     document.querySelector('#description, [id*="description"], [class*="description"]')?.textContent?.trim() || ''
