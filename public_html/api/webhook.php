@@ -297,21 +297,40 @@ function fotografIndir(array $urls): array {
             continue;
         }
 
+        $host     = parse_url($url, PHP_URL_HOST) ?: '';
+        $referer  = parse_url($url, PHP_URL_SCHEME) . '://' . $host . '/';
+        $isSahibinden = strpos($host, 'sahibinden') !== false
+                     || strpos($url, 'hizliresim') !== false
+                     || strpos($url, 'dsmcdn') !== false;
+
         $ch = curl_init($url);
-        curl_setopt_array($ch, [
+        $curlOpts = [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_MAXREDIRS      => 3,
-            CURLOPT_TIMEOUT        => 15,
-            CURLOPT_USERAGENT      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            CURLOPT_REFERER        => parse_url($url, PHP_URL_SCHEME) . '://' . parse_url($url, PHP_URL_HOST) . '/',
+            CURLOPT_MAXREDIRS      => 5,
+            CURLOPT_TIMEOUT        => 20,
+            CURLOPT_USERAGENT      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            CURLOPT_REFERER        => $isSahibinden ? 'https://www.sahibinden.com/' : $referer,
             CURLOPT_SSL_VERIFYPEER => false,
-        ]);
+            CURLOPT_HTTPHEADER     => [
+                'Accept: image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+                'Accept-Language: tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Cache-Control: no-cache',
+                'Pragma: no-cache',
+                'Sec-Fetch-Dest: image',
+                'Sec-Fetch-Mode: no-cors',
+                'Sec-Fetch-Site: cross-site',
+            ],
+        ];
+        curl_setopt_array($ch, $curlOpts);
         $data     = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $ctype    = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
         curl_close($ch);
 
-        if ($data && $httpCode === 200 && strlen($data) > 1000) {
+        // Geçerli resim mi kontrol et
+        $isImage = $ctype && strpos($ctype, 'image/') === 0;
+        if ($data && $httpCode === 200 && strlen($data) > 2000 && $isImage) {
             file_put_contents($hedef, $data);
             $lokal[] = $filename;
         } else {

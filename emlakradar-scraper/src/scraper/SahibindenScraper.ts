@@ -231,14 +231,17 @@ export class SahibindenScraper extends BaseScraper {
       const fotograflar: string[] = [];
       const seen = new Set<string>();
 
+      // Sahibinden URL'sini büyük boyuta çevirir, mümkün değilse orijinali döner
+      const toFullSize = (url: string): string => url.replace(/\/\d+x\d+\//, '/800x600/');
+
       // 1) img tag'lerinden dene
       const fotografEls = document.querySelectorAll(
         '.classifiedDetailMainPhotos img, .swiper-slide img, [class*="photo"] img, [class*="gallery"] img'
       ) as NodeListOf<HTMLImageElement>;
       fotografEls.forEach((img) => {
-        const url = img.getAttribute('data-src') || img.getAttribute('data-lazy') || img.src;
-        if (url && url.startsWith('http') && !url.includes('no-image') && !url.includes('placeholder') && !url.includes('blank') && !url.includes('/assets/images/')) {
-          const fullUrl = url.replace(/\/\d+x\d+\//, '/800x600/');
+        const url = img.getAttribute('data-src') || img.getAttribute('data-lazy') || img.getAttribute('src') || '';
+        if (url && url.startsWith('http') && !url.includes('no-image') && !url.includes('placeholder') && !url.includes('blank') && !url.includes('/assets/images/') && url.length > 20) {
+          const fullUrl = toFullSize(url);
           if (!seen.has(fullUrl)) { seen.add(fullUrl); fotograflar.push(fullUrl); }
         }
       });
@@ -247,27 +250,28 @@ export class SahibindenScraper extends BaseScraper {
       if (fotograflar.length === 0) {
         document.querySelectorAll('script').forEach((script) => {
           const text = script.textContent || '';
-          // Sahibinden foto URL pattern: cdn.dsmcdn.com veya i.emlakkulisi.com vb.
-          const matches = text.matchAll(/"(https?:\/\/(?:cdn\.dsmcdn\.com|i\.emlakkulisi\.com|static\.sahibinden\.com|img\.sahibinden\.com|photos\.sahibinden\.com|cdn\.sahibinden\.com|uploads\.sahibinden\.com|sahibinden-prod\.s3[^"]*\.amazonaws\.com)[^"]+\.(?:jpg|jpeg|png|webp)[^"]*)"/gi);
+          // Sahibinden foto URL pattern: bilinen CDN'ler
+          const cdnPattern = /cdn\.dsmcdn\.com|i\.emlakkulisi\.com|static\.sahibinden\.com|img\.sahibinden\.com|photos\.sahibinden\.com|cdn\.sahibinden\.com|uploads\.sahibinden\.com|s\.sahibinden\.com|i\d*\.hizliresim\.com|sahibinden-prod\.s3[^"]*\.amazonaws\.com/;
+          const matches = text.matchAll(new RegExp('"(https?:\\/\\/(?:' + cdnPattern.source + ')[^"]+\\.(?:jpg|jpeg|png|webp)[^"]*)"', 'gi'));
           for (const m of matches) {
-            const url = m[1].replace(/\/\d+x\d+\//, '/800x600/');
+            const url = toFullSize(m[1]);
             if (!seen.has(url)) { seen.add(url); fotograflar.push(url); }
           }
           // Genel CDN URL pattern backup: "url", "src", "image" key'leri
           if (fotograflar.length === 0) {
             const generic = text.matchAll(/"(?:url|src|image|photo|thumbnail)"\s*:\s*"(https?:\/\/[^"]+\.(?:jpg|jpeg|png|webp))"/gi);
             for (const m of generic) {
-              const url = m[1].replace(/\/\d+x\d+\//, '/800x600/');
+              const url = toFullSize(m[1]);
               if (!seen.has(url) && !url.includes('logo') && !url.includes('icon') && !url.includes('avatar')) {
                 seen.add(url); fotograflar.push(url);
               }
             }
           }
-          // Son çare: sahibinden.com içeren tüm .jpg/.png URL'leri
+          // Son çare: sahibinden.com veya hizliresim içeren tüm .jpg/.png URL'leri
           if (fotograflar.length === 0) {
-            const anyMatch = text.matchAll(/"(https?:\/\/[^"]*sahibinden[^"]+\.(?:jpg|jpeg|png|webp)[^"]*)"/gi);
+            const anyMatch = text.matchAll(/"(https?:\/\/[^"]*(?:sahibinden|hizliresim)[^"]+\.(?:jpg|jpeg|png|webp)[^"]*)"/gi);
             for (const m of anyMatch) {
-              const url = m[1].replace(/\/\d+x\d+\//, '/800x600/');
+              const url = toFullSize(m[1]);
               if (!seen.has(url) && !url.includes('logo') && !url.includes('icon')) {
                 seen.add(url); fotograflar.push(url);
               }

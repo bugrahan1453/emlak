@@ -33,7 +33,10 @@ if (($ilan['sahte_skoru'] ?? 0) >= 70) $etiketler[] = ['label' => 'SAHTE?', 'col
     <!-- Fotoğraf -->
     <div class="relative h-40 overflow-hidden" style="background: rgba(255,255,255,0.03);">
         <?php if ($foto): ?>
-        <img src="<?= APP_URL ?>/uploads/fotograflar/<?= e(basename($foto)) ?>"
+        <?php $fotoSrc = (strpos($foto, 'http') === 0)
+            ? APP_URL . '/api/img-proxy.php?url=' . urlencode($foto)
+            : APP_URL . '/uploads/fotograflar/' . e(basename($foto)); ?>
+        <img src="<?= $fotoSrc ?>"
              alt="<?= e($ilan['baslik'] ?? '') ?>"
              class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
              loading="lazy">
