@@ -16,16 +16,31 @@ if (!in_array($scheme, ['http', 'https'])) {
     exit;
 }
 
+$host = parse_url($url, PHP_URL_HOST) ?: '';
+$isSahibinden = strpos($host, 'sahibinden') !== false
+             || strpos($host, 'dsmcdn') !== false
+             || strpos($host, 'hizliresim') !== false;
+$referer = $isSahibinden
+    ? 'https://www.sahibinden.com/'
+    : (parse_url($url, PHP_URL_SCHEME) . '://' . $host . '/');
+
 $ch = curl_init($url);
 curl_setopt_array($ch, [
     CURLOPT_RETURNTRANSFER => true,
     CURLOPT_FOLLOWLOCATION => true,
     CURLOPT_MAXREDIRS      => 3,
     CURLOPT_TIMEOUT        => 10,
-    CURLOPT_USERAGENT      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    CURLOPT_REFERER        => parse_url($url, PHP_URL_SCHEME) . '://' . parse_url($url, PHP_URL_HOST) . '/',
+    CURLOPT_USERAGENT      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    CURLOPT_REFERER        => $referer,
     CURLOPT_SSL_VERIFYPEER => false,
     CURLOPT_HEADER         => false,
+    CURLOPT_HTTPHEADER     => [
+        'Accept: image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+        'Accept-Language: tr-TR,tr;q=0.9',
+        'Sec-Fetch-Dest: image',
+        'Sec-Fetch-Mode: no-cors',
+        'Sec-Fetch-Site: cross-site',
+    ],
 ]);
 
 $body = curl_exec($ch);
