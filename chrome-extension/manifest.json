@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "EmlakRadar Scraper",
-  "version": "1.0.0",
-  "description": "Sahibinden, Hepsiemlak ve Emlakjet ilanlarını otomatik toplar ve cPanel API'ye gönderir.",
+  "version": "1.1.0",
+  "description": "Çanakkale emlak ilanlarını otomatik toplar.",
 
   "permissions": [
     "tabs",
@@ -14,7 +14,8 @@
   "host_permissions": [
     "https://www.sahibinden.com/*",
     "https://www.hepsiemlak.com/*",
-    "https://www.emlakjet.com/*"
+    "https://www.emlakjet.com/*",
+    "https://hetagayrimenkul.com/*"
   ],
 
   "background": {

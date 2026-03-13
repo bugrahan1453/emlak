@@ -2,122 +2,120 @@
 
 const $ = id => document.getElementById(id);
 
-function showMsg(text, type = 'ok') {
-  const el = $('message');
-  el.textContent = text;
-  el.className   = `message ${type}`;
-  if (type === 'ok') setTimeout(() => { el.textContent = ''; el.className = 'message'; }, 3000);
-}
-
 function formatTime(iso) {
   if (!iso) return '—';
-  const d = new Date(iso);
-  return d.toLocaleString('tr-TR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+  return new Date(iso).toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
-// ─── Yüklenince: ayarları ve durumu oku ──────────────────────────────────────
-document.addEventListener('DOMContentLoaded', async () => {
-  // Kayıtlı ayarları doldur
-  chrome.storage.sync.get({
-    apiUrl: '', webhookSecret: '', cities: 'canakkale',
-    intervalMinutes: 10, maxPages: 3, enabled: false,
-  }, cfg => {
-    $('apiUrl').value          = cfg.apiUrl;
-    $('webhookSecret').value   = cfg.webhookSecret;
-    $('cities').value          = cfg.cities;
-    $('intervalMinutes').value = cfg.intervalMinutes;
-    $('maxPages').value        = cfg.maxPages;
-    $('enabled').checked       = cfg.enabled;
-    updateBadge(cfg.enabled);
-  });
+function setStatus(isRunning, lastError) {
+  const badge = $('status-badge');
+  if (isRunning) {
+    badge.textContent = 'Tarıyor';
+    badge.className   = 'badge running';
+  } else if (lastError) {
+    badge.textContent = 'Hata';
+    badge.className   = 'badge error';
+  } else {
+    badge.textContent = 'Bekliyor';
+    badge.className   = 'badge idle';
+  }
+}
 
-  // Son tarama durumu
+function setLog(msg, type = '') {
+  const el = $('log-text');
+  el.textContent = msg || '—';
+  el.className   = `log-text ${type}`;
+}
+
+function refreshStatus() {
   chrome.runtime.sendMessage({ type: 'get_status' }, data => {
-    if (chrome.runtime.lastError) return;
-    $('last-time').textContent  = formatTime(data.lastScrapeTime);
-    $('last-count').textContent = data.lastScrapeCount != null ? `${data.lastScrapeCount}` : '—';
+    if (chrome.runtime.lastError || !data) return;
 
+    $('last-time').textContent  = formatTime(data.lastScrapeTime);
+    $('last-count').textContent = data.lastScrapeCount != null ? String(data.lastScrapeCount) : '—';
+
+    setStatus(data.isRunning, data.lastError);
+
+    // Progress log
+    if (data.progress?.msg) {
+      setLog(data.progress.msg, data.progress.type === 'done' ? 'done' : data.progress.type === 'error' ? 'error' : data.progress.type === 'ok' ? 'ok' : '');
+    }
+
+    // Hata banner
+    const errArea = $('error-area');
+    errArea.innerHTML = '';
     if (data.lastError) {
-      const errEl = document.createElement('div');
-      errEl.className   = 'error-box';
-      errEl.textContent = `Son hata: ${data.lastError}`;
-      document.querySelector('.message').before(errEl);
+      const div = document.createElement('div');
+      div.className   = 'error-banner';
+      div.textContent = `Son hata: ${data.lastError}`;
+      errArea.appendChild(div);
+    }
+
+    // Buton durumu
+    const btn = $('scrape-btn');
+    if (data.isRunning) {
+      btn.textContent = '⏳ Tarıyor...';
+      btn.className   = 'running';
+      btn.disabled    = true;
+    } else {
+      btn.textContent = '▶ Şimdi Tara';
+      btn.className   = '';
+      btn.disabled    = false;
     }
   });
-});
-
-// ─── Badge güncelle ───────────────────────────────────────────────────────────
-function updateBadge(enabled) {
-  const badge = $('status-badge');
-  badge.textContent = enabled ? 'Aktif' : 'Kapalı';
-  badge.className   = `badge ${enabled ? 'active' : 'inactive'}`;
 }
 
-$('enabled').addEventListener('change', () => updateBadge($('enabled').checked));
+// ─── Yüklenince ──────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  // Ayarları yükle
+  chrome.storage.sync.get({ cities: 'canakkale', intervalMinutes: 10 }, cfg => {
+    $('cities').value          = cfg.cities;
+    $('intervalMinutes').value = cfg.intervalMinutes;
+  });
+
+  refreshStatus();
+
+  // Canlı progress için 1sn polling (popup açıkken)
+  const poll = setInterval(refreshStatus, 1500);
+  window.addEventListener('unload', () => clearInterval(poll));
+});
 
 // ─── Kaydet ───────────────────────────────────────────────────────────────────
 $('save-btn').addEventListener('click', () => {
   const cfg = {
-    apiUrl:          $('apiUrl').value.trim(),
-    webhookSecret:   $('webhookSecret').value.trim(),
     cities:          $('cities').value.trim() || 'canakkale',
     intervalMinutes: parseInt($('intervalMinutes').value) || 10,
-    maxPages:        parseInt($('maxPages').value) || 3,
-    enabled:         $('enabled').checked,
+    enabled:         true,
   };
-
-  if (cfg.enabled && !cfg.apiUrl)        { showMsg('API URL gerekli!', 'error'); return; }
-  if (cfg.enabled && !cfg.webhookSecret) { showMsg('Webhook Secret gerekli!', 'error'); return; }
-
   chrome.storage.sync.set(cfg, () => {
-    if (chrome.runtime.lastError) {
-      showMsg(`Kayıt hatası: ${chrome.runtime.lastError.message}`, 'error');
-    } else {
-      showMsg('✓ Ayarlar kaydedildi', 'ok');
-      updateBadge(cfg.enabled);
-    }
+    setLog('Ayarlar kaydedildi', 'ok');
+    setTimeout(() => setLog('Hazır'), 2000);
   });
 });
 
-// ─── Manuel Tara ──────────────────────────────────────────────────────────────
+// ─── Şimdi Tara ───────────────────────────────────────────────────────────────
 $('scrape-btn').addEventListener('click', () => {
-  const apiUrl        = $('apiUrl').value.trim();
-  const webhookSecret = $('webhookSecret').value.trim();
-
-  if (!apiUrl)        { showMsg('Önce API URL gir ve Kaydet!', 'error'); return; }
-  if (!webhookSecret) { showMsg('Önce Webhook Secret gir ve Kaydet!', 'error'); return; }
-
-  // Önce ayarları kaydet, sonra tara
-  const cfg = {
-    apiUrl,
-    webhookSecret,
-    cities:          $('cities').value.trim() || 'canakkale',
-    intervalMinutes: parseInt($('intervalMinutes').value) || 10,
-    maxPages:        parseInt($('maxPages').value) || 3,
-    enabled:         $('enabled').checked,
-  };
-
   const btn = $('scrape-btn');
   btn.disabled    = true;
-  btn.textContent = '⏳ Tarıyor...';
+  btn.textContent = '⏳ Başlatılıyor...';
+  btn.className   = 'running';
+
+  // Ayarları önce kaydet
+  const cfg = {
+    cities:          $('cities').value.trim() || 'canakkale',
+    intervalMinutes: parseInt($('intervalMinutes').value) || 10,
+    enabled:         true,
+  };
 
   chrome.storage.sync.set(cfg, () => {
-    showMsg('Tarama başlatıldı — arka planda sekmeler açılacak', 'info');
+    setLog('Tarama başlatıldı...', '');
 
     chrome.runtime.sendMessage({ type: 'manual_scrape' }, res => {
-      btn.disabled    = false;
-      btn.textContent = '▶ Şimdi Tara';
-
       if (chrome.runtime.lastError || !res?.ok) {
-        showMsg(`Hata: ${res?.error || chrome.runtime.lastError?.message || 'bilinmiyor'}`, 'error');
-      } else {
-        chrome.runtime.sendMessage({ type: 'get_status' }, data => {
-          if (chrome.runtime.lastError) return;
-          $('last-time').textContent  = formatTime(data.lastScrapeTime);
-          $('last-count').textContent = data.lastScrapeCount != null ? `${data.lastScrapeCount}` : '—';
-        });
-        showMsg('✓ Tarama tamamlandı', 'ok');
+        const errMsg = res?.error || chrome.runtime.lastError?.message || 'bilinmiyor';
+        setLog(`Hata: ${errMsg}`, 'error');
       }
+      refreshStatus();
     });
   });
 });
