@@ -31,8 +31,10 @@ export abstract class BaseScraper {
   };
 
   // Daha önce görülmüş ilanları takip etmek için bellek içi depo
-  // Gerçek uygulamada bu veritabanından/Redis'ten gelecek
   protected seenIlanlar: Map<string, IlanVeri> = new Map();
+
+  // FlareSolverr oturum kimliği (alt sınıflar tarafından set edilebilir)
+  protected flareSolverrSession: string | undefined;
 
   abstract get kaynakAdi(): string;
   abstract get baseUrl(): string;
@@ -149,7 +151,7 @@ export abstract class BaseScraper {
    */
   protected async navigateWithFlareSolverr(page: Page, url: string, waitMs?: [number, number]): Promise<void> {
     this.logger.info(`FlareSolverr ile yükleniyor: ${url}`);
-    const result = await solveCloudflare(url);
+    const result = await solveCloudflare(url, this.flareSolverrSession);
 
     if (!result) {
       this.logger.warn('FlareSolverr başarısız, normal navigasyon deneniyor');

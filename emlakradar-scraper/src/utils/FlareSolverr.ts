@@ -29,20 +29,19 @@ export interface FlareResult {
 
 /**
  * Verilen URL için Cloudflare challenge'ı çözer ve cookies + UA döner.
- * Bu bilgiyi Puppeteer sayfasına inject ederek CF korumasını geçeriz.
+ * sessionId verilirse mevcut FlareSolverr oturumunu kullanır.
  */
-export async function solveCloudflare(url: string): Promise<FlareResult | null> {
+export async function solveCloudflare(url: string, sessionId?: string): Promise<FlareResult | null> {
   try {
     logger.info(`CF challenge çözülüyor: ${url}`);
-    const res = await axios.post(
-      FLARESOLVERR_URL,
-      {
-        cmd: 'request.get',
-        url,
-        maxTimeout: 60000,
-      },
-      { timeout: 70000 }
-    );
+    const body: Record<string, unknown> = {
+      cmd: 'request.get',
+      url,
+      maxTimeout: 90000,
+    };
+    if (sessionId) body.session = sessionId;
+
+    const res = await axios.post(FLARESOLVERR_URL, body, { timeout: 100000 });
 
     if (res.data?.status === 'ok' && res.data?.solution) {
       const sol = res.data.solution;
@@ -61,6 +60,30 @@ export async function solveCloudflare(url: string): Promise<FlareResult | null> 
     const msg = err instanceof Error ? err.message : String(err);
     logger.error(`FlareSolverr hatası: ${msg}`);
     return null;
+  }
+}
+
+/**
+ * FlareSolverr'da kalıcı tarayıcı oturumu oluşturur.
+ * Oturumlar cookie'leri istekler arasında paylaşır.
+ */
+export async function createFlareSolverrSession(sessionId: string): Promise<boolean> {
+  try {
+    const res = await axios.post(FLARESOLVERR_URL, { cmd: 'sessions.create', session: sessionId }, { timeout: 15000 });
+    return res.data?.status === 'ok';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * FlareSolverr oturumunu sonlandırır.
+ */
+export async function destroyFlareSolverrSession(sessionId: string): Promise<void> {
+  try {
+    await axios.post(FLARESOLVERR_URL, { cmd: 'sessions.destroy', session: sessionId }, { timeout: 10000 });
+  } catch {
+    // sessizce geç
   }
 }
 

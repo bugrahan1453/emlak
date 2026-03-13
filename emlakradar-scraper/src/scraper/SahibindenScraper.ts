@@ -5,6 +5,7 @@ import type { Page } from 'puppeteer';
 import { BaseScraper } from './BaseScraper';
 import { IlanVeri } from '../types';
 import { normalizeUrl, extractIdFromUrl, parseFiyat, parseMetrekare, normalizeTelefon } from '../utils/Helpers';
+import { createFlareSolverrSession, destroyFlareSolverrSession, solveCloudflare } from '../utils/FlareSolverr';
 import { config } from '../config';
 
 // Sayfa başına ilan sayısı (sahibinden tipik: 28)
@@ -15,20 +16,39 @@ export class SahibindenScraper extends BaseScraper {
   get baseUrl(): string { return 'https://www.sahibinden.com'; }
 
   async scrape(): Promise<void> {
-    const cities = config.scraper.cities; // ['istanbul', 'canakkale', ...]
+    const cities = config.scraper.cities;
     const kategoriler = [
       { yol: 'satilik-daire', tip: 'satilik' as const },
       { yol: 'kiralik-daire', tip: 'kiralik' as const },
     ];
 
-    for (const kat of kategoriler) {
-      for (const city of cities) {
-        // istanbul için /satilik-daire, diğerleri için /satilik-daire/canakkale
-        const cityYol = city === 'istanbul'
-          ? `/${kat.yol}`
-          : `/${kat.yol}/${city}`;
-        await this.scrapeKategori(cityYol, kat.tip);
-        await new Promise(r => setTimeout(r, config.scraper.delayMax));
+    // FlareSolverr oturumu oluştur — tüm sahibinden isteklerinde aynı tarayıcı kullanılsın
+    const sessionId = `sb_${Date.now()}`;
+    const sessionCreated = await createFlareSolverrSession(sessionId);
+    if (sessionCreated) {
+      this.flareSolverrSession = sessionId;
+      this.logger.info(`FlareSolverr oturumu oluşturuldu: ${sessionId}`);
+
+      // Ana sayfa warm-up: gerçek kullanıcı gibi önce ana sayfayı ziyaret et
+      this.logger.info('Ana sayfa warm-up başlıyor...');
+      await solveCloudflare(`${this.baseUrl}`, sessionId);
+      await new Promise(r => setTimeout(r, 3000));
+    }
+
+    try {
+      for (const kat of kategoriler) {
+        for (const city of cities) {
+          const cityYol = city === 'istanbul'
+            ? `/${kat.yol}`
+            : `/${kat.yol}/${city}`;
+          await this.scrapeKategori(cityYol, kat.tip);
+          await new Promise(r => setTimeout(r, config.scraper.delayMax));
+        }
+      }
+    } finally {
+      if (sessionCreated) {
+        await destroyFlareSolverrSession(sessionId);
+        this.flareSolverrSession = undefined;
       }
     }
   }
@@ -40,7 +60,7 @@ export class SahibindenScraper extends BaseScraper {
       const ilkUrl = `${this.baseUrl}${yol}`;
       await this.navigateWithFlareSolverr(page, ilkUrl);
       // JS render bekleniyor — ilan satırları yüklensin
-      await page.waitForSelector('tr.searchResultsItem', { timeout: 15000 }).catch(() => {});
+      await page.waitForSelector('tr.searchResultsItem', { timeout: 30000 }).catch(() => {});
 
       // Toplam sayfa sayısını bul
       const toplamSayfa = await this.getTotalPages(page);
@@ -55,7 +75,7 @@ export class SahibindenScraper extends BaseScraper {
 
         if (sayfa > 1) {
           await this.navigateWithFlareSolverr(page, sayfaUrl);
-          await page.waitForSelector('tr.searchResultsItem', { timeout: 15000 }).catch(() => {});
+          await page.waitForSelector('tr.searchResultsItem', { timeout: 30000 }).catch(() => {});
         }
 
         await this.scrollPage(page);
