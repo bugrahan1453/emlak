@@ -443,6 +443,33 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 // LİSTE CONTENT SCRIPTS — sadece mevcut sayfayı parse eder, nextUrl döner
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Tüm content script'lerin kullandığı gerçekçi scroll fonksiyonu
+async function humanScroll() {
+  const total  = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+  const step   = () => 100 + Math.random() * 120;   // 100–220px her adım
+  const pause  = () => 60  + Math.random() * 100;   // 60–160ms normal bekleme
+  const longP  = () => 700 + Math.random() * 1200;  // 0.7–1.9s okuma molası
+  let pos = 0;
+
+  while (pos < total - 200) {
+    pos += step();
+    window.scrollTo(0, Math.min(pos, total));
+    if (Math.random() < 0.12) await new Promise(r => setTimeout(r, longP())); // okuma molası
+    else                       await new Promise(r => setTimeout(r, pause()));
+    // Zaman zaman biraz geri çekil (insan davranışı)
+    if (Math.random() < 0.08) {
+      pos -= 150 + Math.random() * 250;
+      window.scrollTo(0, Math.max(0, pos));
+      await new Promise(r => setTimeout(r, 300 + Math.random() * 400));
+    }
+  }
+
+  // En alta bak, sonra yukarı dön
+  await new Promise(r => setTimeout(r, 400 + Math.random() * 600));
+  window.scrollTo(0, 0);
+  await new Promise(r => setTimeout(r, 300));
+}
+
 async function sahibindenScript(tip, kategori, city) {
   const BASE = 'https://www.sahibinden.com';
 
@@ -461,11 +488,8 @@ async function sahibindenScript(tip, kategori, city) {
     return;
   }
 
-  window.scrollTo(0, document.body.scrollHeight / 2);
-  await new Promise(r => setTimeout(r, 500));
-  window.scrollTo(0, document.body.scrollHeight);
-  await new Promise(r => setTimeout(r, 500));
-  window.scrollTo(0, 0);
+  // İnsan gibi scroll
+  await humanScroll();
 
   const ilanlar = [];
   document.querySelectorAll('tr.searchResultsItem').forEach(satir => {
@@ -530,6 +554,21 @@ async function hepsiemlakScript(tip, kategori, city) {
   const BASE = 'https://www.hepsiemlak.com';
   const SEL  = '.listing-item, .listing-item-v2, li[data-id], [data-listing-id]';
 
+  async function humanScroll() {
+    const total = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+    const step  = () => 100 + Math.random() * 120;
+    const pause = () => 60  + Math.random() * 100;
+    const longP = () => 700 + Math.random() * 1200;
+    let pos = 0;
+    while (pos < total - 200) {
+      pos += step(); window.scrollTo(0, Math.min(pos, total));
+      if (Math.random() < 0.12) await new Promise(r => setTimeout(r, longP()));
+      else                       await new Promise(r => setTimeout(r, pause()));
+      if (Math.random() < 0.08) { pos -= 150 + Math.random() * 250; window.scrollTo(0, Math.max(0, pos)); await new Promise(r => setTimeout(r, 350)); }
+    }
+    await new Promise(r => setTimeout(r, 500)); window.scrollTo(0, 0); await new Promise(r => setTimeout(r, 300));
+  }
+
   async function waitFor(selector, ms = 25000) {
     const start = Date.now();
     while (Date.now() - start < ms) {
@@ -540,10 +579,7 @@ async function hepsiemlakScript(tip, kategori, city) {
   }
 
   await waitFor(SEL);
-  window.scrollTo(0, document.body.scrollHeight / 2);
-  await new Promise(r => setTimeout(r, 800));
-  window.scrollTo(0, document.body.scrollHeight);
-  await new Promise(r => setTimeout(r, 800));
+  await humanScroll();
 
   const ilanlar = [];
   document.querySelectorAll(SEL).forEach(kart => {
@@ -602,6 +638,21 @@ async function emlakjetScript(tip, kategori, city) {
   const BASE = 'https://www.emlakjet.com';
   const SEL  = '[class*="listing-card"], [class*="ListingCard"], [class*="property-card"], article[data-id]';
 
+  async function humanScroll() {
+    const total = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+    const step  = () => 100 + Math.random() * 120;
+    const pause = () => 60  + Math.random() * 100;
+    const longP = () => 700 + Math.random() * 1200;
+    let pos = 0;
+    while (pos < total - 200) {
+      pos += step(); window.scrollTo(0, Math.min(pos, total));
+      if (Math.random() < 0.12) await new Promise(r => setTimeout(r, longP()));
+      else                       await new Promise(r => setTimeout(r, pause()));
+      if (Math.random() < 0.08) { pos -= 150 + Math.random() * 250; window.scrollTo(0, Math.max(0, pos)); await new Promise(r => setTimeout(r, 350)); }
+    }
+    await new Promise(r => setTimeout(r, 500)); window.scrollTo(0, 0); await new Promise(r => setTimeout(r, 300));
+  }
+
   async function waitFor(ms = 20000) {
     const start = Date.now();
     while (Date.now() - start < ms) {
@@ -612,10 +663,7 @@ async function emlakjetScript(tip, kategori, city) {
   }
 
   await waitFor();
-  window.scrollTo(0, document.body.scrollHeight / 2);
-  await new Promise(r => setTimeout(r, 800));
-  window.scrollTo(0, document.body.scrollHeight);
-  await new Promise(r => setTimeout(r, 800));
+  await humanScroll();
 
   const ilanlar = [];
   document.querySelectorAll(SEL).forEach(kart => {
@@ -683,6 +731,23 @@ async function sahibindenDetailScript() {
   }
 
   await waitFor('.classifiedDetailMainPhoto, .classified-detail, h1.classifiedDetailTitle', 20000);
+
+  // İnsan gibi scroll
+  async function humanScroll() {
+    const total = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+    const step  = () => 110 + Math.random() * 110;
+    const pause = () => 70  + Math.random() * 100;
+    const longP = () => 600 + Math.random() * 1000;
+    let pos = 0;
+    while (pos < total - 200) {
+      pos += step(); window.scrollTo(0, Math.min(pos, total));
+      if (Math.random() < 0.1) await new Promise(r => setTimeout(r, longP()));
+      else                      await new Promise(r => setTimeout(r, pause()));
+      if (Math.random() < 0.07) { pos -= 150 + Math.random() * 200; window.scrollTo(0, Math.max(0, pos)); await new Promise(r => setTimeout(r, 300)); }
+    }
+    await new Promise(r => setTimeout(r, 400)); window.scrollTo(0, 0); await new Promise(r => setTimeout(r, 200));
+  }
+  await humanScroll();
 
   // Açıklama
   const aciklama = (
