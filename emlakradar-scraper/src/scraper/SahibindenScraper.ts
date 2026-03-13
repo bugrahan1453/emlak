@@ -158,9 +158,9 @@ export class SahibindenScraper extends BaseScraper {
 
           const odaText = attrCells[1]?.textContent?.trim() || '';
 
-          // getAttribute kullan — setContent bağlamında img.src about:blank'e göre resolve olabilir
+          // data-src önce gelsin — lazy-load blank placeholder'ı almamak için
           const fotografEl = satir.querySelector('td.searchResultsLargeThumbnail img');
-          const fotografUrl = fotografEl?.getAttribute('src') || fotografEl?.getAttribute('data-src') || '';
+          const fotografUrl = fotografEl?.getAttribute('data-src') || fotografEl?.getAttribute('data-lazy') || fotografEl?.getAttribute('src') || '';
 
           const tarihEl = satir.querySelector('.searchResultsDateValue');
           const tarihSpanlar = tarihEl?.querySelectorAll('span') || [];
@@ -195,7 +195,7 @@ export class SahibindenScraper extends BaseScraper {
             adres: lokasyonParcalar.join(', '),
             metrekare: metrekare ?? undefined,
             oda_sayisi: odaText || undefined,
-            fotograflar: fotografUrl ? [fotografUrl] : [],
+            fotograflar: (fotografUrl && fotografUrl.startsWith('http') && !fotografUrl.includes('blank') && !fotografUrl.includes('/assets/images/')) ? [fotografUrl] : [],
             ilan_tarihi: tarih || undefined,
             taranan_at: new Date().toISOString(),
           };
@@ -237,7 +237,7 @@ export class SahibindenScraper extends BaseScraper {
       ) as NodeListOf<HTMLImageElement>;
       fotografEls.forEach((img) => {
         const url = img.getAttribute('data-src') || img.getAttribute('data-lazy') || img.src;
-        if (url && url.startsWith('http') && !url.includes('no-image') && !url.includes('placeholder')) {
+        if (url && url.startsWith('http') && !url.includes('no-image') && !url.includes('placeholder') && !url.includes('blank') && !url.includes('/assets/images/')) {
           const fullUrl = url.replace(/\/\d+x\d+\//, '/800x600/');
           if (!seen.has(fullUrl)) { seen.add(fullUrl); fotograflar.push(fullUrl); }
         }
