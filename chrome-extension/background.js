@@ -46,8 +46,9 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   // İlk kurulumda ayarları kaydet ve hemen başlat
   if (details.reason === 'install') {
     await chrome.storage.sync.set({ cities: DEFAULT_CITIES, intervalMinutes: 10, enabled: true });
-    chrome.alarms.create('scrape', { delayInMinutes: 0.1, periodInMinutes: 10 });
-    setTimeout(() => runAllScrapers(true), 3000);
+    chrome.alarms.create('scrape', { delayInMinutes: 2, periodInMinutes: 10 });
+    // İlk kurulumda bot algısını tetiklememek için 2 dakika bekle
+    setTimeout(() => runAllScrapers(true), 2 * 60 * 1000);
   } else {
     const cfg = await getConfig();
     chrome.alarms.create('scrape', { delayInMinutes: 1, periodInMinutes: cfg.intervalMinutes || 10 });
@@ -86,6 +87,23 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 });
 
+// ─── Bot Bloğu Kontrolü ───────────────────────────────────────────────────────
+async function checkBotBlock(tabId) {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const txt = document.body?.innerText || '';
+        return txt.includes('Olağan dışı erişim') ||
+               txt.includes('olağan dışı') ||
+               txt.includes('robot') ||
+               document.title.toLowerCase().includes('erişim engellendi');
+      },
+    });
+    return results?.[0]?.result === true;
+  } catch (_) { return false; }
+}
+
 // ─── Ana Koordinatör ──────────────────────────────────────────────────────────
 let isRunning = false;
 
@@ -115,6 +133,13 @@ async function runAllScrapers(force = false) {
 
         if (i > 0) await navigateTab(tabId, job.url);
 
+        // Bot bloğu kontrolü
+        if (await checkBotBlock(tabId)) {
+          sendProgress(`⚠️ Bot bloğu — ${job.site} 5 dk beklenecek`, 'error');
+          await sleep(5 * 60 * 1000);
+          continue;
+        }
+
         // 1. Liste sayfalarını tara
         const ilanlar = await injectAndCollect(tabId, job);
 
@@ -143,7 +168,8 @@ async function runAllScrapers(force = false) {
         sendProgress(`Hata: ${job.site} - ${err.message}`, 'error');
       }
 
-      await sleep(1000 + Math.random() * 800);
+      // Siteler arası insan gibi bekleme: 8–18 saniye
+      await sleep(8000 + Math.random() * 10000);
     }
   } finally {
     chrome.tabs.remove(tabId).catch(() => {});
@@ -232,8 +258,9 @@ async function injectAndCollect(tabId, job) {
     const result = await injectOnce(tabId, job);
     allIlanlar.push(...(result.ilanlar || []));
     if (!result.nextUrl || page >= (job.maxPages || 5)) break;
+    // Sayfalar arası: 5–12 saniye (bot algısını önlemek için)
+    await sleep(5000 + Math.random() * 7000);
     await navigateTab(tabId, result.nextUrl);
-    await sleep(1000 + Math.random() * 600);
     page++;
   }
 
@@ -284,7 +311,12 @@ async function scrapeDetails(tabId, ilanlar, site) {
     if (!ilan.kaynak_url) { zengin.push(ilan); continue; }
     try {
       await navigateTab(tabId, ilan.kaynak_url);
-      await sleep(800);
+      // Bot bloğu kontrolü
+      if (await checkBotBlock(tabId)) {
+        sendProgress('⚠️ Bot bloğu (detay) — 5 dk bekleniyor', 'error');
+        await sleep(5 * 60 * 1000);
+        zengin.push(ilan); continue;
+      }
       const detail = await injectDetail(tabId, detailFn);
 
       // Temel veriyi detay verisi ile zenginleştir
@@ -306,7 +338,8 @@ async function scrapeDetails(tabId, ilanlar, site) {
       console.warn('[EmlakRadar] Detay hatası:', ilan.kaynak_url, err.message);
       zengin.push(ilan);
     }
-    await sleep(600 + Math.random() * 400);
+    // Detay sayfaları arası: 5–10 saniye
+    await sleep(5000 + Math.random() * 5000);
   }
   return zengin;
 }
