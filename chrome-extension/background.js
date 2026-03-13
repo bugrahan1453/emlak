@@ -1,7 +1,7 @@
 'use strict';
 /**
  * EmlakRadar Chrome Extension — Background Service Worker
- * Zamanlayıcı, tab yönetimi, cPanel webhook gönderimi
+ * Tek sekme mimarisi: background pagination kontrolü
  */
 
 // ─── HMAC-SHA256 İmzalayıcı (Web Crypto API) ─────────────────────────────────
@@ -25,7 +25,7 @@ function getConfig() {
       webhookSecret:   '',
       cities:          'canakkale',
       intervalMinutes: 10,
-      maxPages:        3,
+      maxPages:        5,
       enabled:         false,
     }, resolve);
   });
@@ -42,7 +42,6 @@ chrome.runtime.onInstalled.addListener(async () => {
   });
 });
 
-// Interval değişince alarm'ı güncelle
 chrome.storage.onChanged.addListener(async (changes) => {
   if (changes.intervalMinutes) {
     const minutes = changes.intervalMinutes.newValue || 10;
@@ -59,7 +58,7 @@ chrome.alarms.onAlarm.addListener(async alarm => {
 // ─── Popup Mesajları ──────────────────────────────────────────────────────────
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'manual_scrape') {
-    runAllScrapers(true) // force=true → toggle'ı atla
+    runAllScrapers(true)
       .then(() => sendResponse({ ok: true }))
       .catch(err => sendResponse({ ok: false, error: err.message }));
     return true;
@@ -92,7 +91,7 @@ async function runAllScrapers(force = false) {
 
   console.log(`[EmlakRadar] Scrape başladı — ${jobs.length} iş, şehirler: ${cities.join(', ')}`);
 
-  // ── Tek sekme aç, tüm işleri sırayla o sekmede yap ──────────────────────
+  // Tek sekme aç, tüm işleri sırayla o sekmede yap
   const tab = await createTab(jobs[0].url);
   const tabId = tab.id;
   let toplamYeni = 0;
@@ -101,7 +100,6 @@ async function runAllScrapers(force = false) {
     for (let i = 0; i < jobs.length; i++) {
       const job = jobs[i];
       try {
-        // İlk iş zaten yüklü, diğerleri için navigate et
         if (i > 0) await navigateTab(tabId, job.url);
 
         const ilanlar = await injectAndCollect(tabId, job);
@@ -113,13 +111,13 @@ async function runAllScrapers(force = false) {
           toplamYeni += yeniler.length;
         }
 
-        console.log(`[EmlakRadar] ${job.site} | ${job.tip} | ${job.city} → ${ilanlar.length} ilan, ${yeniler.length} yeni`);
+        console.log(`[EmlakRadar] ${job.site} | ${job.kategori} | ${job.tip} | ${job.city} → ${ilanlar.length} ilan, ${yeniler.length} yeni`);
       } catch (err) {
-        console.error(`[EmlakRadar] Hata (${job.site}):`, err.message);
+        console.error(`[EmlakRadar] Hata (${job.site} ${job.kategori}):`, err.message);
         await chrome.storage.local.set({ lastError: `${job.site}: ${err.message}` });
       }
 
-      await sleep(1500 + Math.random() * 1500);
+      await sleep(1200 + Math.random() * 1000);
     }
   } finally {
     chrome.tabs.remove(tabId).catch(() => {});
@@ -138,30 +136,37 @@ function buildJobs(cities, maxPages) {
   const jobs = [];
 
   for (const city of cities) {
-    // Sahibinden
-    for (const tip of ['satilik', 'kiralik']) {
-      const kategori = tip === 'satilik' ? 'satilik-daire' : 'kiralik-daire';
-      const yol = city === 'istanbul' ? `/${kategori}` : `/${kategori}/${city}`;
-      jobs.push({ site: 'sahibinden', url: `https://www.sahibinden.com${yol}`, tip, city, maxPages });
+    // Sahibinden — daire + arsa + müstakil
+    const sbKats = [
+      { slug: 'satilik-daire',      tip: 'satilik', kategori: 'daire' },
+      { slug: 'kiralik-daire',      tip: 'kiralik', kategori: 'daire' },
+      { slug: 'satilik-arsa',       tip: 'satilik', kategori: 'arsa' },
+      { slug: 'satilik-mustakil-ev',tip: 'satilik', kategori: 'mustakil' },
+      { slug: 'satilik-villa',      tip: 'satilik', kategori: 'villa' },
+    ];
+    for (const k of sbKats) {
+      const yol = city === 'istanbul' ? `/${k.slug}` : `/${k.slug}/${city}`;
+      jobs.push({ site: 'sahibinden', url: `https://www.sahibinden.com${yol}`, tip: k.tip, kategori: k.kategori, city, maxPages });
     }
 
-    // Hepsiemlak
-    for (const tip of ['satilik', 'kiralik']) {
-      jobs.push({
-        site: 'hepsiemlak',
-        url:  `https://www.hepsiemlak.com/${city}-${tip}/daire`,
-        tip, city, maxPages,
-      });
+    // Hepsiemlak — daire + arsa
+    const heKats = [
+      { slug: `${city}-satilik/daire`,   tip: 'satilik', kategori: 'daire' },
+      { slug: `${city}-kiralik/daire`,   tip: 'kiralik', kategori: 'daire' },
+      { slug: `${city}-satilik/arsa`,    tip: 'satilik', kategori: 'arsa' },
+    ];
+    for (const k of heKats) {
+      jobs.push({ site: 'hepsiemlak', url: `https://www.hepsiemlak.com/${k.slug}`, tip: k.tip, kategori: k.kategori, city, maxPages });
     }
 
-    // Emlakjet
-    for (const tip of ['satilik', 'kiralik']) {
-      const kategori = tip === 'satilik' ? 'satilik-daire' : 'kiralik-daire';
-      jobs.push({
-        site: 'emlakjet',
-        url:  `https://www.emlakjet.com/${kategori}/${city}/`,
-        tip, city, maxPages,
-      });
+    // Emlakjet — daire + arsa
+    const ejKats = [
+      { slug: 'satilik-daire',   tip: 'satilik', kategori: 'daire' },
+      { slug: 'kiralik-daire',   tip: 'kiralik', kategori: 'daire' },
+      { slug: 'satilik-arsa',    tip: 'satilik', kategori: 'arsa' },
+    ];
+    for (const k of ejKats) {
+      jobs.push({ site: 'emlakjet', url: `https://www.emlakjet.com/${k.slug}/${city}/`, tip: k.tip, kategori: k.kategori, city, maxPages });
     }
   }
 
@@ -170,7 +175,6 @@ function buildJobs(cities, maxPages) {
 
 // ─── Tek Sekme Yardımcıları ───────────────────────────────────────────────────
 
-// Yeni sekme aç ve yüklenmesini bekle
 function createTab(url) {
   return new Promise((resolve, reject) => {
     chrome.tabs.create({ url, active: false }, tab => {
@@ -186,7 +190,6 @@ function createTab(url) {
   });
 }
 
-// Mevcut sekmeyi yeni URL'ye yönlendir ve yüklenmesini bekle
 function navigateTab(tabId, url) {
   return new Promise((resolve, reject) => {
     chrome.tabs.update(tabId, { url }, () => {
@@ -202,8 +205,32 @@ function navigateTab(tabId, url) {
   });
 }
 
-// Sekmeye content script inject et ve sonucu bekle
-function injectAndCollect(tabId, job) {
+// Background pagination kontrolü — content script sadece mevcut sayfayı parse eder
+async function injectAndCollect(tabId, job) {
+  const allIlanlar = [];
+  let page = 1;
+
+  while (page <= (job.maxPages || 5)) {
+    const result = await injectOnce(tabId, job);
+    allIlanlar.push(...(result.ilanlar || []));
+
+    if (!result.nextUrl || page >= (job.maxPages || 5)) break;
+
+    await navigateTab(tabId, result.nextUrl);
+    await sleep(1200 + Math.random() * 800);
+    page++;
+  }
+
+  // Dedup
+  const seen = new Set();
+  return allIlanlar.filter(i => {
+    if (seen.has(i.kaynak_id)) return false;
+    seen.add(i.kaynak_id);
+    return true;
+  });
+}
+
+function injectOnce(tabId, job) {
   return new Promise(resolve => {
     let done = false;
 
@@ -211,17 +238,17 @@ function injectAndCollect(tabId, job) {
       if (done) return;
       done = true;
       chrome.runtime.onMessage.removeListener(onMsg);
-      console.warn(`[EmlakRadar] Timeout: ${job.url}`);
-      resolve([]);
-    }, 90000);
+      console.warn('[EmlakRadar] Sayfa timeout:', job.url);
+      resolve({ ilanlar: [], nextUrl: null });
+    }, 60000);
 
     function onMsg(msg, sender) {
-      if (sender.tab?.id !== tabId || msg.type !== 'emlakradar_result') return;
+      if (sender.tab?.id !== tabId || msg.type !== 'emlakradar_page') return;
       if (done) return;
       done = true;
       clearTimeout(timer);
       chrome.runtime.onMessage.removeListener(onMsg);
-      resolve(msg.ilanlar || []);
+      resolve({ ilanlar: msg.ilanlar || [], nextUrl: msg.nextUrl || null });
     }
 
     chrome.runtime.onMessage.addListener(onMsg);
@@ -229,14 +256,14 @@ function injectAndCollect(tabId, job) {
     chrome.scripting.executeScript({
       target: { tabId },
       func:   getContentFn(job.site),
-      args:   [job.tip, job.city, job.maxPages],
+      args:   [job.tip, job.kategori, job.city],
     }).catch(err => {
       if (done) return;
       done = true;
       clearTimeout(timer);
       chrome.runtime.onMessage.removeListener(onMsg);
       console.error('[EmlakRadar] executeScript hata:', err.message);
-      resolve([]);
+      resolve({ ilanlar: [], nextUrl: null });
     });
   });
 }
@@ -246,7 +273,7 @@ function getContentFn(site) {
     case 'sahibinden': return sahibindenScript;
     case 'hepsiemlak': return hepsiemlakScript;
     case 'emlakjet':   return emlakjetScript;
-    default: return () => chrome.runtime.sendMessage({ type: 'emlakradar_result', ilanlar: [] });
+    default: return () => chrome.runtime.sendMessage({ type: 'emlakradar_page', ilanlar: [], nextUrl: null });
   }
 }
 
@@ -254,8 +281,8 @@ function getContentFn(site) {
 async function sendWebhook(ilanlar, cfg) {
   const BATCH = 10;
   for (let i = 0; i < ilanlar.length; i += BATCH) {
-    const batch   = ilanlar.slice(i, i + BATCH);
-    const body    = JSON.stringify({
+    const batch = ilanlar.slice(i, i + BATCH);
+    const body  = JSON.stringify({
       tip:    'yeni_ilan',
       ilanlar: batch,
       zaman:  new Date().toISOString(),
@@ -279,10 +306,13 @@ async function sendWebhook(ilanlar, cfg) {
       const txt = await res.text().catch(() => '');
       throw new Error(`HTTP ${res.status}: ${txt.substring(0, 200)}`);
     }
+
+    const json = await res.json().catch(() => ({}));
+    console.log(`[EmlakRadar] Webhook yanıtı:`, json);
   }
 }
 
-// ─── Deduplication (chrome.storage.local) ─────────────────────────────────────
+// ─── Deduplication ────────────────────────────────────────────────────────────
 function filterYeni(ilanlar) {
   return new Promise(resolve => {
     chrome.storage.local.get(['seenIds'], ({ seenIds = [] }) => {
@@ -304,14 +334,14 @@ function markGoruldu(ilanlar) {
 // ─── Yardımcılar ──────────────────────────────────────────────────────────────
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// =============================================================================
-// CONTENT SCRIPTS (executeScript ile inject edilir — her biri bağımsız fonksiyon)
-// =============================================================================
+// ─────────────────────────────────────────────────────────────────────────────
+// CONTENT SCRIPTS
+// Her site için: mevcut sayfayı parse et + nextUrl bul
+// Background pagination kontrolü yapar (window.location.href kullanılmaz)
+// ─────────────────────────────────────────────────────────────────────────────
 
-// ─── Sahibinden ───────────────────────────────────────────────────────────────
-async function sahibindenScript(tip, city, maxPages) {
+async function sahibindenScript(tip, kategori, city) {
   const BASE = 'https://www.sahibinden.com';
-  const ITEMS_PER_PAGE = 28;
 
   async function waitFor(selector, ms = 30000) {
     const start = Date.now();
@@ -322,303 +352,290 @@ async function sahibindenScript(tip, city, maxPages) {
     return false;
   }
 
-  function parseSayfa() {
-    const ilanlar = [];
-    document.querySelectorAll('tr.searchResultsItem').forEach(satir => {
-      try {
-        const id = satir.getAttribute('data-id') || '';
-        if (!id) return;
-
-        const baslikEl  = satir.querySelector('.classifiedTitle');
-        const baslik    = baslikEl?.textContent?.trim() || '';
-        const href      = baslikEl?.getAttribute('href') || '';
-        const kaynak_url = href.startsWith('http') ? href : BASE + href;
-
-        const fiyatEl  = satir.querySelector('td.searchResultsPriceValue span');
-        const fiyat    = parseFloat(
-          (fiyatEl?.textContent?.trim() || '').replace(/\./g,'').replace(',','.').replace(/[^0-9.]/g,'')
-        ) || 0;
-
-        const lokEl   = satir.querySelector('td.searchResultsLocationValue');
-        const lokHtml = lokEl?.innerHTML || '';
-        const lokPar  = lokHtml.split(/<br\s*\/?>/i)
-          .map(s => s.replace(/<[^>]+>/g,'').trim()).filter(Boolean);
-
-        const attrs     = satir.querySelectorAll('td.searchResultsAttributeValue');
-        const metrekare = parseFloat(
-          (attrs[0]?.textContent?.trim()||'').replace(/\./g,'').replace(',','.').replace(/[^0-9.]/g,'')
-        ) || null;
-        const odaText = attrs[1]?.textContent?.trim() || '';
-
-        const imgEl    = satir.querySelector('td.searchResultsLargeThumbnail img');
-        const foto     = imgEl?.getAttribute('data-src') || imgEl?.getAttribute('data-lazy') || imgEl?.src || '';
-        const tarihEl  = satir.querySelector('.searchResultsDateValue');
-        const tarih    = tarihEl?.textContent?.trim() || '';
-
-        ilanlar.push({
-          kaynak_site: 'sahibinden', kaynak_url, kaynak_id: id,
-          baslik, aciklama: '', fiyat, fiyat_birimi: 'TL', tip, kategori: 'daire',
-          sehir: lokPar[0] || city, ilce: lokPar[1] || '', mahalle: lokPar[2] || '',
-          adres: lokPar.join(', '),
-          metrekare: metrekare || undefined, oda_sayisi: odaText || undefined,
-          fotograflar: (foto && foto.startsWith('http') && !foto.includes('blank') && !foto.includes('/assets/')) ? [foto] : [],
-          ilan_tarihi: tarih || undefined, taranan_at: new Date().toISOString(),
-        });
-      } catch (_) {}
-    });
-    return ilanlar;
-  }
-
-  function getTotalPages() {
-    try {
-      const txt = document.querySelector('.searchResultsTagArea .resultCount')?.textContent?.trim() || '0';
-      return Math.ceil((parseInt(txt.replace(/[^\d]/g,'')) || 0) / ITEMS_PER_PAGE);
-    } catch { return 1; }
-  }
-
-  async function navigateTo(url) {
-    return new Promise(resolve => {
-      window.location.href = url;
-      const timer = setInterval(() => {
-        if (document.readyState === 'complete') { clearInterval(timer); resolve(); }
-      }, 500);
-    });
-  }
-
-  // İlk sayfa zaten yüklü
   const found = await waitFor('tr.searchResultsItem');
   if (!found) {
-    chrome.runtime.sendMessage({ type: 'emlakradar_result', ilanlar: [] });
+    chrome.runtime.sendMessage({ type: 'emlakradar_page', ilanlar: [], nextUrl: null });
     return;
   }
 
-  const toplamSayfa = Math.min(getTotalPages(), maxPages || 3);
-  const tumIlanlar  = [];
+  // Lazy image yükle
+  window.scrollTo(0, document.body.scrollHeight / 2);
+  await new Promise(r => setTimeout(r, 600));
+  window.scrollTo(0, document.body.scrollHeight);
+  await new Promise(r => setTimeout(r, 600));
+  window.scrollTo(0, 0);
 
-  for (let sayfa = 1; sayfa <= toplamSayfa; sayfa++) {
-    if (sayfa > 1) {
-      const url = window.location.href.split('?')[0] + `?pagingOffset=${(sayfa - 1) * ITEMS_PER_PAGE}`;
-      await navigateTo(url);
-      await waitFor('tr.searchResultsItem');
-    }
-    tumIlanlar.push(...parseSayfa());
-    await new Promise(r => setTimeout(r, 1500));
+  const ilanlar = [];
+  document.querySelectorAll('tr.searchResultsItem').forEach(satir => {
+    try {
+      const id = satir.getAttribute('data-id') || '';
+      if (!id) return;
+
+      const baslikEl  = satir.querySelector('.classifiedTitle');
+      const baslik    = baslikEl?.textContent?.trim() || '';
+      const href      = baslikEl?.getAttribute('href') || '';
+      const kaynak_url = href.startsWith('http') ? href : BASE + href;
+      if (!kaynak_url || !baslik) return;
+
+      const fiyatEl = satir.querySelector('td.searchResultsPriceValue span');
+      const fiyat   = parseFloat(
+        (fiyatEl?.textContent?.trim() || '').replace(/\./g,'').replace(',','.').replace(/[^0-9.]/g,'')
+      ) || 0;
+
+      // Konum
+      const lokEl   = satir.querySelector('td.searchResultsLocationValue');
+      const lokHtml = lokEl?.innerHTML || '';
+      const lokPar  = lokHtml.split(/<br\s*\/?>/i)
+        .map(s => s.replace(/<[^>]+>/g,'').trim()).filter(Boolean);
+
+      // Özellikler (m², oda, kat, bina yaşı vb.)
+      const attrs    = Array.from(satir.querySelectorAll('td.searchResultsAttributeValue'));
+      const attrTxt  = attrs.map(a => a.textContent?.trim() || '');
+
+      const metrekare = parseFloat(
+        (attrTxt[0] || '').replace(/\./g,'').replace(',','.').replace(/[^0-9.]/g,'')
+      ) || null;
+      const odaText = attrTxt[1] || '';
+
+      // Fotoğraflar — thumbnail + data-src varyantları
+      const imgs = [];
+      satir.querySelectorAll('img').forEach(img => {
+        const src = img.getAttribute('data-src') || img.getAttribute('data-lazy') || img.src || '';
+        if (src && src.startsWith('http') && !src.includes('blank') && !src.includes('/assets/') && !src.includes('spacer'))
+          imgs.push(src);
+      });
+
+      const tarihEl = satir.querySelector('.searchResultsDateValue');
+      const tarih   = tarihEl?.textContent?.trim() || '';
+
+      ilanlar.push({
+        kaynak_site: 'sahibinden',
+        kaynak_url,
+        kaynak_id:   id,
+        baslik,
+        aciklama:    '',
+        fiyat,
+        fiyat_birimi:'TL',
+        tip,
+        kategori,
+        sehir:       lokPar[0] || city,
+        ilce:        lokPar[1] || '',
+        mahalle:     lokPar[2] || '',
+        adres:       lokPar.join(', '),
+        metrekare:   metrekare || undefined,
+        oda_sayisi:  odaText || undefined,
+        fotograflar: imgs,
+        ilan_tarihi: tarih || undefined,
+        taranan_at:  new Date().toISOString(),
+      });
+    } catch (_) {}
+  });
+
+  // Sonraki sayfa
+  let nextUrl = null;
+  const nextEl = document.querySelector('a.prevNextBut[title*="Sonraki"], a[title*="Sonraki sayfa"], a[aria-label*="Sonraki"]');
+  if (nextEl) {
+    const href = nextEl.getAttribute('href') || '';
+    nextUrl = href.startsWith('http') ? href : BASE + href;
   }
 
-  chrome.runtime.sendMessage({ type: 'emlakradar_result', ilanlar: tumIlanlar });
+  chrome.runtime.sendMessage({ type: 'emlakradar_page', ilanlar, nextUrl });
 }
 
 // ─── Hepsiemlak ───────────────────────────────────────────────────────────────
-async function hepsiemlakScript(tip, city, maxPages) {
+async function hepsiemlakScript(tip, kategori, city) {
   const BASE = 'https://www.hepsiemlak.com';
-  const ITEMS_PER_PAGE = 25;
 
-  async function waitFor(selector, ms = 20000) {
+  async function waitFor(selector, ms = 25000) {
     const start = Date.now();
     while (Date.now() - start < ms) {
-      if (document.querySelectorAll(selector).length > 2) return true;
+      if (document.querySelectorAll(selector).length > 0) return true;
       await new Promise(r => setTimeout(r, 1000));
     }
     return false;
   }
 
-  function parseSayfa() {
-    const ilanlar = [];
-    const sellar  = ['.listing-item', '.listing-item-v2', 'li[data-id]', '[data-listing-id]'];
+  const SEL = '.listing-item, .listing-item-v2, li[data-id], [data-listing-id]';
+  await waitFor(SEL);
 
-    let kartlar = null;
-    for (const sel of sellar) {
-      const f = document.querySelectorAll(sel);
-      if (f.length > 2) { kartlar = f; break; }
-    }
-    if (!kartlar) return ilanlar;
+  window.scrollTo(0, document.body.scrollHeight / 2);
+  await new Promise(r => setTimeout(r, 800));
+  window.scrollTo(0, document.body.scrollHeight);
+  await new Promise(r => setTimeout(r, 800));
 
-    kartlar.forEach(kart => {
-      try {
-        let id = kart.getAttribute('data-id') || kart.getAttribute('data-listing-id') || '';
-        const baslikEl = kart.querySelector('h2 a, h3 a, .listing-card-title a, .listing-title a, a[title], a[class*="title"]');
-        const href     = (baslikEl || kart.querySelector('a'))?.getAttribute('href') || '';
-
-        if (!id && href) {
-          const m = href.match(/[/-](\d{6,})(?:\/|$|\?)/);
-          id = m ? m[1] : '';
-        }
-        if (!id) return;
-
-        const baslik     = baslikEl?.textContent?.trim() || (baslikEl || kart.querySelector('a'))?.getAttribute('title') || '';
-        const kaynak_url = href.startsWith('http') ? href : BASE + href;
-
-        const fiyatEl = kart.querySelector('[class*="price"], [class*="fiyat"]');
-        const fiyat   = parseFloat(
-          (fiyatEl?.textContent?.trim()||'').replace(/\./g,'').replace(',','.').replace(/[^0-9.]/g,'')
-        ) || 0;
-
-        const lokEl  = kart.querySelector('[class*="location"], [class*="adres"], [class*="konum"]');
-        const lokTxt = lokEl?.textContent?.trim() || '';
-        const lokPar = lokTxt.split(/[\/,]/).map(s => s.trim()).filter(Boolean);
-
-        const m2El     = kart.querySelector('[class*="m2"], [class*="meter"], [class*="area"]');
-        const metrekare = parseFloat(
-          (m2El?.textContent?.trim()||'').replace(/[^\d,]/g,'').replace(',','.')
-        ) || null;
-
-        const odaEl  = kart.querySelector('[class*="room"], [class*="oda"]');
-        const imgEl  = kart.querySelector('img');
-        const foto   = imgEl?.getAttribute('data-src') || imgEl?.getAttribute('data-lazy') || imgEl?.src || '';
-
-        ilanlar.push({
-          kaynak_site: 'hepsiemlak', kaynak_url, kaynak_id: `he_${id}`,
-          baslik, aciklama: '', fiyat, fiyat_birimi: 'TL', tip, kategori: 'daire',
-          sehir: lokPar[0] || city, ilce: lokPar[1] || '', mahalle: lokPar[2] || '',
-          adres: lokTxt, metrekare: metrekare || undefined,
-          oda_sayisi: odaEl?.textContent?.trim() || undefined,
-          fotograflar: (foto && foto.startsWith('http') && !foto.includes('no-image')) ? [foto] : [],
-          taranan_at: new Date().toISOString(),
-        });
-      } catch (_) {}
-    });
-    return ilanlar;
-  }
-
-  function getTotalPages() {
+  const ilanlar = [];
+  document.querySelectorAll(SEL).forEach(kart => {
     try {
-      const sel = '.total-count, [class*="result-count"], [class*="listing-count"], [class*="total-result"]';
-      const txt = document.querySelector(sel)?.textContent?.trim() || '0';
-      return Math.ceil((parseInt(txt.replace(/[^\d]/g,'')) || 0) / ITEMS_PER_PAGE);
-    } catch { return 1; }
+      let id = kart.getAttribute('data-id') || kart.getAttribute('data-listing-id') || '';
+
+      const baslikEl  = kart.querySelector('h2 a, h3 a, .listing-card-title a, a[title], a[class*="title"]');
+      const anyA      = baslikEl || kart.querySelector('a');
+      const href      = anyA?.getAttribute('href') || '';
+
+      if (!id && href) {
+        const m = href.match(/[/-](\d{6,})(?:\/|$|\?)/);
+        id = m ? m[1] : '';
+      }
+      if (!id) return;
+
+      const baslik    = baslikEl?.textContent?.trim() || anyA?.getAttribute('title') || '';
+      const kaynak_url = href.startsWith('http') ? href : BASE + href;
+      if (!kaynak_url || !baslik) return;
+
+      const fiyatEl = kart.querySelector('[class*="price"], [class*="fiyat"]');
+      const fiyat   = parseFloat(
+        (fiyatEl?.textContent?.trim() || '').replace(/\./g,'').replace(',','.').replace(/[^0-9.]/g,'')
+      ) || 0;
+
+      const lokEl  = kart.querySelector('[class*="location"], [class*="adres"], [class*="konum"]');
+      const lokTxt = lokEl?.textContent?.trim() || '';
+      const lokPar = lokTxt.split(/[\/,]/).map(s => s.trim()).filter(Boolean);
+
+      const m2El     = kart.querySelector('[class*="m2"], [class*="meter"], [class*="area"], [class*="brut"]');
+      const metrekare = parseFloat(
+        (m2El?.textContent?.trim() || '').replace(/[^\d,]/g,'').replace(',','.')
+      ) || null;
+
+      const odaEl = kart.querySelector('[class*="room"], [class*="oda"]');
+
+      const imgs = [];
+      kart.querySelectorAll('img').forEach(img => {
+        const src = img.getAttribute('data-src') || img.getAttribute('data-lazy') || img.src || '';
+        if (src && src.startsWith('http') && !src.includes('no-image') && src.length > 15)
+          imgs.push(src);
+      });
+
+      ilanlar.push({
+        kaynak_site: 'hepsiemlak',
+        kaynak_url,
+        kaynak_id:   `he_${id}`,
+        baslik,
+        aciklama:    '',
+        fiyat,
+        fiyat_birimi:'TL',
+        tip,
+        kategori,
+        sehir:       lokPar[0] || city,
+        ilce:        lokPar[1] || '',
+        mahalle:     lokPar[2] || '',
+        adres:       lokTxt,
+        metrekare:   metrekare || undefined,
+        oda_sayisi:  odaEl?.textContent?.trim() || undefined,
+        fotograflar: imgs,
+        taranan_at:  new Date().toISOString(),
+      });
+    } catch (_) {}
+  });
+
+  // Sonraki sayfa
+  let nextUrl = null;
+  const nextEl = document.querySelector(
+    'a[rel="next"], .he-pagination__navigate--next a, a[title*="Sonraki"], [class*="pagination"] [class*="next"] a'
+  );
+  if (nextEl) {
+    const href = nextEl.getAttribute('href') || '';
+    nextUrl = href.startsWith('http') ? href : BASE + href;
   }
 
-  await waitFor('.listing-item, .listing-item-v2, [data-listing-id]');
-
-  const toplamSayfa = Math.min(getTotalPages(), maxPages || 3);
-  const tumIlanlar  = [];
-
-  for (let sayfa = 1; sayfa <= toplamSayfa; sayfa++) {
-    if (sayfa > 1) {
-      const baseUrl = window.location.href.split('?')[0];
-      window.location.href = `${baseUrl}?page=${sayfa}`;
-      await new Promise(r => setTimeout(r, 3000));
-      await waitFor('.listing-item, .listing-item-v2, [data-listing-id]');
-    }
-    tumIlanlar.push(...parseSayfa());
-    await new Promise(r => setTimeout(r, 1000));
-  }
-
-  // Dedup
-  const seenIds = new Set();
-  const uniq    = tumIlanlar.filter(i => { if (seenIds.has(i.kaynak_id)) return false; seenIds.add(i.kaynak_id); return true; });
-  chrome.runtime.sendMessage({ type: 'emlakradar_result', ilanlar: uniq });
+  chrome.runtime.sendMessage({ type: 'emlakradar_page', ilanlar, nextUrl });
 }
 
 // ─── Emlakjet ─────────────────────────────────────────────────────────────────
-async function emlakjetScript(tip, city, maxPages) {
+async function emlakjetScript(tip, kategori, city) {
   const BASE = 'https://www.emlakjet.com';
-  const ITEMS_PER_PAGE = 20;
 
-  async function waitFor(ms = 15000) {
+  async function waitFor(ms = 20000) {
     const start = Date.now();
+    const SEL = '[class*="listing-card"], [class*="ListingCard"], [class*="property-card"], article[data-id]';
     while (Date.now() - start < ms) {
-      const sel = '[class*="listing-card"], [class*="ListingCard"], [class*="property-card"], article[data-id], a[href*="/ilan/"]';
-      if (document.querySelectorAll(sel).length > 0) return true;
+      if (document.querySelectorAll(SEL).length > 0) return true;
       await new Promise(r => setTimeout(r, 1000));
     }
     return false;
-  }
-
-  function parseSayfa() {
-    const ilanlar = [];
-    const sellar  = [
-      '[class*="listing-card"]', '[class*="ListingCard"]',
-      '[class*="property-card"]', 'article[data-id]', 'a[href*="/ilan/"]',
-    ];
-
-    let kartlar = null;
-    for (const sel of sellar) {
-      const f = document.querySelectorAll(sel);
-      if (f.length > 0) { kartlar = f; break; }
-    }
-    if (!kartlar) return ilanlar;
-
-    kartlar.forEach(kart => {
-      try {
-        let id   = kart.getAttribute('data-id') || kart.getAttribute('data-listing-id') || '';
-        const aEl = kart.tagName === 'A' ? kart : kart.querySelector('a');
-        const href = aEl?.getAttribute('href') || aEl?.href || '';
-
-        if (!id && href) {
-          const m = href.match(/\/ilan\/(\d+)/) || href.match(/[/-](\d{6,})(?:\/|$|\?)/);
-          id = m ? m[1] : '';
-        }
-        if (!id) return;
-
-        const kaynak_url = href.startsWith('http') ? href : BASE + href;
-
-        const baslikEl = kart.querySelector('[class*="title"], [class*="Title"], h2, h3');
-        const baslik   = baslikEl?.textContent?.trim() || '';
-
-        const fiyatEl = kart.querySelector('[class*="price"], [class*="Price"], [class*="fiyat"]');
-        const fiyat   = parseFloat(
-          (fiyatEl?.textContent?.trim()||'').replace(/[^\d]/g,'')
-        ) || 0;
-
-        const lokEl  = kart.querySelector('[class*="location"], [class*="Location"], [class*="adres"]');
-        const lokTxt = lokEl?.textContent?.trim() || '';
-        const lokPar = lokTxt.split(/[,\/]/).map(s => s.trim()).filter(Boolean);
-
-        const m2El     = kart.querySelector('[class*="m2"], [class*="area"], [class*="Area"]');
-        const metrekare = parseFloat(
-          (m2El?.textContent?.trim()||'').replace(/[^\d,]/g,'').replace(',','.')
-        ) || null;
-
-        const odaEl = kart.querySelector('[class*="room"], [class*="Room"], [class*="oda"]');
-        const imgEl = kart.querySelector('img');
-        const foto  = imgEl?.getAttribute('data-src') || imgEl?.getAttribute('data-lazy') || imgEl?.src || '';
-
-        ilanlar.push({
-          kaynak_site: 'emlakjet', kaynak_url, kaynak_id: `ej_${id}`,
-          baslik, aciklama: '', fiyat, fiyat_birimi: 'TL', tip, kategori: 'daire',
-          sehir: lokPar[0] || city, ilce: lokPar[1] || '', mahalle: lokPar[2] || '',
-          adres: lokTxt, metrekare: metrekare || undefined,
-          oda_sayisi: odaEl?.textContent?.trim() || undefined,
-          fotograflar: (foto && foto.startsWith('http') && !foto.includes('no-image')) ? [foto] : [],
-          taranan_at: new Date().toISOString(),
-        });
-      } catch (_) {}
-    });
-
-    const seen = new Set();
-    return ilanlar.filter(i => { if (seen.has(i.kaynak_id)) return false; seen.add(i.kaynak_id); return true; });
-  }
-
-  function getTotalPages() {
-    try {
-      const sel = '[class*="result-count"], [class*="listing-count"], [class*="count"]';
-      const txt = document.querySelector(sel)?.textContent?.trim() || '0';
-      return Math.ceil((parseInt(txt.replace(/[^\d]/g,'')) || 0) / ITEMS_PER_PAGE);
-    } catch { return 1; }
   }
 
   await waitFor();
 
-  // Scroll ile lazy-load tetikle
   window.scrollTo(0, document.body.scrollHeight / 2);
-  await new Promise(r => setTimeout(r, 1000));
+  await new Promise(r => setTimeout(r, 800));
   window.scrollTo(0, document.body.scrollHeight);
-  await new Promise(r => setTimeout(r, 1000));
+  await new Promise(r => setTimeout(r, 800));
 
-  const toplamSayfa = Math.min(getTotalPages(), maxPages || 3);
-  const tumIlanlar  = [];
+  const SEL = '[class*="listing-card"], [class*="ListingCard"], [class*="property-card"], article[data-id]';
+  const ilanlar = [];
 
-  for (let sayfa = 1; sayfa <= toplamSayfa; sayfa++) {
-    if (sayfa > 1) {
-      const base = window.location.href.split('?')[0];
-      window.location.href = `${base}?page=${sayfa}`;
-      await new Promise(r => setTimeout(r, 3000));
-      await waitFor();
-    }
-    tumIlanlar.push(...parseSayfa());
-    await new Promise(r => setTimeout(r, 1000));
+  document.querySelectorAll(SEL).forEach(kart => {
+    try {
+      let id = kart.getAttribute('data-id') || kart.getAttribute('data-listing-id') || '';
+      const aEl  = kart.tagName === 'A' ? kart : kart.querySelector('a');
+      const href = aEl?.getAttribute('href') || aEl?.href || '';
+
+      if (!id && href) {
+        const m = href.match(/\/ilan\/(\d+)/) || href.match(/[/-](\d{6,})(?:\/|$|\?)/);
+        id = m ? m[1] : '';
+      }
+      if (!id) return;
+
+      const kaynak_url = href.startsWith('http') ? href : BASE + href;
+
+      const baslikEl = kart.querySelector('[class*="title"], [class*="Title"], h2, h3');
+      const baslik   = baslikEl?.textContent?.trim() || '';
+      if (!kaynak_url || !baslik) return;
+
+      const fiyatEl = kart.querySelector('[class*="price"], [class*="Price"], [class*="fiyat"]');
+      const fiyat   = parseFloat(
+        (fiyatEl?.textContent?.trim() || '').replace(/[^\d]/g,'')
+      ) || 0;
+
+      const lokEl  = kart.querySelector('[class*="location"], [class*="Location"], [class*="adres"]');
+      const lokTxt = lokEl?.textContent?.trim() || '';
+      const lokPar = lokTxt.split(/[,\/]/).map(s => s.trim()).filter(Boolean);
+
+      const m2El     = kart.querySelector('[class*="m2"], [class*="area"], [class*="Area"]');
+      const metrekare = parseFloat(
+        (m2El?.textContent?.trim() || '').replace(/[^\d,]/g,'').replace(',','.')
+      ) || null;
+
+      const odaEl = kart.querySelector('[class*="room"], [class*="Room"], [class*="oda"]');
+
+      const imgs = [];
+      kart.querySelectorAll('img').forEach(img => {
+        const src = img.getAttribute('data-src') || img.getAttribute('data-lazy') || img.src || '';
+        if (src && src.startsWith('http') && !src.includes('no-image'))
+          imgs.push(src);
+      });
+
+      ilanlar.push({
+        kaynak_site: 'emlakjet',
+        kaynak_url,
+        kaynak_id:   `ej_${id}`,
+        baslik,
+        aciklama:    '',
+        fiyat,
+        fiyat_birimi:'TL',
+        tip,
+        kategori,
+        sehir:       lokPar[0] || city,
+        ilce:        lokPar[1] || '',
+        mahalle:     lokPar[2] || '',
+        adres:       lokTxt,
+        metrekare:   metrekare || undefined,
+        oda_sayisi:  odaEl?.textContent?.trim() || undefined,
+        fotograflar: imgs,
+        taranan_at:  new Date().toISOString(),
+      });
+    } catch (_) {}
+  });
+
+  // Sonraki sayfa
+  let nextUrl = null;
+  const nextEl = document.querySelector(
+    'a[rel="next"], [class*="pagination"] a[class*="next"], [class*="Pagination"] a[class*="Next"]'
+  );
+  if (nextEl) {
+    const href = nextEl.getAttribute('href') || '';
+    nextUrl = href.startsWith('http') ? href : BASE + href;
   }
 
-  chrome.runtime.sendMessage({ type: 'emlakradar_result', ilanlar: tumIlanlar });
+  chrome.runtime.sendMessage({ type: 'emlakradar_page', ilanlar, nextUrl });
 }
