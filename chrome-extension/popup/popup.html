@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width">
+  <title>EmlakRadar Scraper</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      width: 360px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 13px;
+      background: #0f1117;
+      color: #e2e8f0;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #1a1f2e, #232b3e);
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border-bottom: 1px solid #2d3748;
+    }
+    .header h1 { font-size: 15px; font-weight: 600; flex: 1; }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 12px;
+      font-weight: 500;
+    }
+    .badge.active   { background: #1a3a2a; color: #68d391; }
+    .badge.inactive { background: #3a1a1a; color: #fc8181; }
+    .badge::before { content: '●'; font-size: 8px; }
+
+    .stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1px;
+      background: #2d3748;
+      border-bottom: 1px solid #2d3748;
+    }
+    .stat {
+      background: #1a1f2e;
+      padding: 10px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .stat .label { font-size: 10px; color: #718096; text-transform: uppercase; letter-spacing: 0.5px; }
+    .stat .value { font-size: 13px; font-weight: 600; color: #a0aec0; }
+    .stat .value.highlight { color: #68d391; }
+
+    .section {
+      padding: 14px 16px;
+      border-bottom: 1px solid #1e2535;
+    }
+    .section-title {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #4a5568;
+      margin-bottom: 10px;
+      font-weight: 600;
+    }
+
+    .form-group {
+      margin-bottom: 10px;
+    }
+    .form-group:last-child { margin-bottom: 0; }
+
+    label {
+      display: block;
+      font-size: 11px;
+      color: #718096;
+      margin-bottom: 4px;
+    }
+
+    input[type="url"],
+    input[type="password"],
+    input[type="text"],
+    input[type="number"] {
+      width: 100%;
+      background: #1e2535;
+      border: 1px solid #2d3748;
+      border-radius: 6px;
+      padding: 7px 10px;
+      color: #e2e8f0;
+      font-size: 12px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input:focus { border-color: #4299e1; }
+    input::placeholder { color: #4a5568; }
+
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .toggle-label { font-size: 12px; color: #a0aec0; }
+
+    .toggle {
+      position: relative;
+      width: 36px;
+      height: 20px;
+    }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle-slider {
+      position: absolute;
+      inset: 0;
+      background: #2d3748;
+      border-radius: 20px;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+    .toggle-slider::before {
+      content: '';
+      position: absolute;
+      width: 14px;
+      height: 14px;
+      left: 3px;
+      top: 3px;
+      background: #718096;
+      border-radius: 50%;
+      transition: 0.2s;
+    }
+    .toggle input:checked + .toggle-slider { background: #2d6a4f; }
+    .toggle input:checked + .toggle-slider::before { transform: translateX(16px); background: #68d391; }
+
+    .buttons {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      padding: 12px 16px;
+      border-bottom: 1px solid #1e2535;
+    }
+
+    button {
+      padding: 8px 12px;
+      border: none;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: 0.15s;
+    }
+    #save-btn {
+      background: #2b6cb0;
+      color: #fff;
+    }
+    #save-btn:hover { background: #3182ce; }
+    #scrape-btn {
+      background: #276749;
+      color: #fff;
+    }
+    #scrape-btn:hover { background: #38a169; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .message {
+      padding: 0 16px;
+      min-height: 32px;
+      display: flex;
+      align-items: center;
+      font-size: 11px;
+    }
+    .message.ok    { color: #68d391; }
+    .message.error { color: #fc8181; }
+    .message.info  { color: #63b3ed; }
+
+    .error-box {
+      background: #3a1a1a;
+      border: 1px solid #742a2a;
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-size: 11px;
+      color: #fc8181;
+      margin-top: 8px;
+      word-break: break-all;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>🏠 EmlakRadar Scraper</h1>
+    <span id="status-badge" class="badge inactive">Kapalı</span>
+  </div>
+
+  <div class="stats">
+    <div class="stat">
+      <span class="label">Son Tarama</span>
+      <span class="value" id="last-time">—</span>
+    </div>
+    <div class="stat">
+      <span class="label">Yeni İlan</span>
+      <span class="value highlight" id="last-count">—</span>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Bağlantı</div>
+
+    <div class="form-group">
+      <label>cPanel Webhook URL</label>
+      <input type="url" id="apiUrl" placeholder="https://siteniz.com/scraper/webhook.php">
+    </div>
+
+    <div class="form-group">
+      <label>Webhook Secret</label>
+      <input type="password" id="webhookSecret" placeholder="Gizli anahtar (.env ile aynı)">
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Tarama Ayarları</div>
+
+    <div class="form-group">
+      <label>Şehirler (virgülle ayır)</label>
+      <input type="text" id="cities" placeholder="canakkale,istanbul,izmir">
+    </div>
+
+    <div class="form-group">
+      <label>Tarama Aralığı (dakika)</label>
+      <input type="number" id="intervalMinutes" min="5" max="120" value="10">
+    </div>
+
+    <div class="form-group">
+      <label>Sayfa Limiti (site başına)</label>
+      <input type="number" id="maxPages" min="1" max="10" value="3">
+    </div>
+
+    <div class="form-group" style="margin-top:12px;">
+      <div class="toggle-row">
+        <span class="toggle-label">Otomatik Taramayı Etkinleştir</span>
+        <label class="toggle">
+          <input type="checkbox" id="enabled">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <div class="buttons">
+    <button id="save-btn">💾 Kaydet</button>
+    <button id="scrape-btn">▶ Şimdi Tara</button>
+  </div>
+
+  <div id="message" class="message"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

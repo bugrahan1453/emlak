@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "EmlakRadar Scraper",
+  "version": "1.0.0",
+  "description": "Sahibinden, Hepsiemlak ve Emlakjet ilanlarını otomatik toplar ve cPanel API'ye gönderir.",
+
+  "permissions": [
+    "tabs",
+    "scripting",
+    "alarms",
+    "storage"
+  ],
+
+  "host_permissions": [
+    "https://www.sahibinden.com/*",
+    "https://www.hepsiemlak.com/*",
+    "https://www.emlakjet.com/*"
+  ],
+
+  "background": {
+    "service_worker": "background.js"
+  },
+
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "EmlakRadar Scraper"
+  }
+}
