@@ -85,15 +85,34 @@ switch ($tip) {
         foreach ($ilanlar as $i) {
             try {
                 // Mükerrer kontrol
+                $mevcut_id = null;
                 if (!empty($i['kaynak_url'])) {
-                    $stmt = $pdo->prepare("SELECT id FROM ilanlar WHERE kaynak_url = ? LIMIT 1");
+                    $stmt = $pdo->prepare("SELECT id, fotograflar FROM ilanlar WHERE kaynak_url = ? LIMIT 1");
                     $stmt->execute([$i['kaynak_url']]);
-                    if ($stmt->fetch()) { $atilan++; continue; }
+                    $mevcut_row = $stmt->fetch(PDO::FETCH_ASSOC);
+                    if ($mevcut_row) $mevcut_id = $mevcut_row['id'];
                 }
-                if (!empty($i['kaynak_id'])) {
-                    $stmt = $pdo->prepare("SELECT id FROM ilanlar WHERE kaynak_id = ? AND kaynak_site = ? LIMIT 1");
+                if (!$mevcut_id && !empty($i['kaynak_id'])) {
+                    $stmt = $pdo->prepare("SELECT id, fotograflar FROM ilanlar WHERE kaynak_id = ? AND kaynak_site = ? LIMIT 1");
                     $stmt->execute([$i['kaynak_id'], $i['kaynak_site'] ?? '']);
-                    if ($stmt->fetch()) { $atilan++; continue; }
+                    $mevcut_row = $stmt->fetch(PDO::FETCH_ASSOC);
+                    if ($mevcut_row) $mevcut_id = $mevcut_row['id'];
+                }
+                if ($mevcut_id) {
+                    // Mevcut ilanın fotoğrafları kırık mı kontrol et
+                    $mevcutFotos = json_decode($mevcut_row['fotograflar'] ?? '[]', true) ?: [];
+                    $uploadDir   = dirname(__DIR__) . '/uploads/fotograflar/';
+                    $fotoBozuk   = empty($mevcutFotos) || (
+                        isset($mevcutFotos[0]) &&
+                        strpos($mevcutFotos[0], 'http') !== 0 &&
+                        (!file_exists($uploadDir . basename($mevcutFotos[0])) || filesize($uploadDir . basename($mevcutFotos[0])) < 2000)
+                    );
+                    if ($fotoBozuk && !empty($i['fotograflar'])) {
+                        $yeniFotos = fotografIndir($i['fotograflar']);
+                        $pdo->prepare("UPDATE ilanlar SET fotograflar = ? WHERE id = ?")
+                            ->execute([json_encode($yeniFotos), $mevcut_id]);
+                    }
+                    $atilan++; continue;
                 }
 
                 $ilanData = mapIlanData($i);
@@ -277,6 +296,12 @@ switch ($tip) {
 // ── Yardımcı: Dış fotoğraf URL'lerini sunucuya indir ──────────────────────
 function fotografIndir(array $urls): array {
     $uploadDir = dirname(__DIR__) . '/uploads/fotograflar/';
+
+    // Dizin yoksa oluştur
+    if (!is_dir($uploadDir)) {
+        @mkdir($uploadDir, 0755, true);
+    }
+
     $lokal = [];
 
     foreach (array_slice($urls, 0, 10) as $url) { // max 10 foto
@@ -291,8 +316,8 @@ function fotografIndir(array $urls): array {
         $filename = 'scraper_' . md5($url) . '.' . $ext;
         $hedef    = $uploadDir . $filename;
 
-        // Zaten indirilmişse tekrar indirme
-        if (file_exists($hedef)) {
+        // Zaten indirilmişse ve geçerliyse tekrar indirme
+        if (file_exists($hedef) && filesize($hedef) > 2000) {
             $lokal[] = $filename;
             continue;
         }
@@ -300,11 +325,11 @@ function fotografIndir(array $urls): array {
         $host     = parse_url($url, PHP_URL_HOST) ?: '';
         $referer  = parse_url($url, PHP_URL_SCHEME) . '://' . $host . '/';
         $isSahibinden = strpos($host, 'sahibinden') !== false
-                     || strpos($url, 'hizliresim') !== false
-                     || strpos($url, 'dsmcdn') !== false;
+                     || strpos($host, 'hizliresim') !== false
+                     || strpos($host, 'dsmcdn') !== false;
 
         $ch = curl_init($url);
-        $curlOpts = [
+        curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_FOLLOWLOCATION => true,
             CURLOPT_MAXREDIRS      => 5,
@@ -314,15 +339,12 @@ function fotografIndir(array $urls): array {
             CURLOPT_SSL_VERIFYPEER => false,
             CURLOPT_HTTPHEADER     => [
                 'Accept: image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
-                'Accept-Language: tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
-                'Cache-Control: no-cache',
-                'Pragma: no-cache',
+                'Accept-Language: tr-TR,tr;q=0.9',
                 'Sec-Fetch-Dest: image',
                 'Sec-Fetch-Mode: no-cors',
                 'Sec-Fetch-Site: cross-site',
             ],
-        ];
-        curl_setopt_array($ch, $curlOpts);
+        ]);
         $data     = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $ctype    = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
@@ -331,10 +353,15 @@ function fotografIndir(array $urls): array {
         // Geçerli resim mi kontrol et
         $isImage = $ctype && strpos($ctype, 'image/') === 0;
         if ($data && $httpCode === 200 && strlen($data) > 2000 && $isImage) {
-            file_put_contents($hedef, $data);
-            $lokal[] = $filename;
+            // Dosya yazımını kontrol et — başarısız olursa URL'yi sakla
+            if (@file_put_contents($hedef, $data) !== false) {
+                $lokal[] = $filename;
+            } else {
+                error_log("fotografIndir: Yazma hatası ($hedef) — URL yedek olarak saklandı");
+                $lokal[] = $url; // img-proxy ile gösterilecek
+            }
         } else {
-            // İndirme başarısız → orijinal URL'yi yedek olarak sakla (img-proxy ile gösterilecek)
+            // İndirme başarısız → URL'yi sakla (img-proxy ile gösterilecek)
             $lokal[] = $url;
         }
     }
