@@ -154,6 +154,27 @@ export class HepsiemlakScraper extends BaseScraper {
   }
 
   private async parseSayfa(page: Page, tip: 'satilik' | 'kiralik'): Promise<IlanVeri[]> {
+    // Debug: İlk listeleme kartının yapısını logla
+    const ilkKartDebug = await page.evaluate(() => {
+      const sels = ['.listing-item', '.listing-item-v2', 'li[data-id]', 'article[data-id]', '[data-listing-id]'];
+      for (const sel of sels) {
+        const el = document.querySelector(sel);
+        if (el) {
+          return {
+            sel,
+            tag: el.tagName,
+            classes: el.className,
+            html: el.outerHTML.substring(0, 800),
+          };
+        }
+      }
+      return null;
+    });
+    if (ilkKartDebug) {
+      this.logger.info(`Hepsiemlak ilk kart yapısı: sel="${ilkKartDebug.sel}" tag=${ilkKartDebug.tag} classes="${ilkKartDebug.classes}"`);
+      this.logger.info(`Hepsiemlak ilk kart HTML: ${ilkKartDebug.html}`);
+    }
+
     return page.evaluate((baseUrl: string, tip: string) => {
       const ilanlar: IlanVeri[] = [];
 

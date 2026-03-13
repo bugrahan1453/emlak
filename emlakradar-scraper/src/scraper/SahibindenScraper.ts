@@ -62,6 +62,17 @@ export class SahibindenScraper extends BaseScraper {
       // JS render bekleniyor — ilan satırları yüklensin
       await page.waitForSelector('tr.searchResultsItem', { timeout: 30000 }).catch(() => {});
 
+      // Bot-detection kontrolü: "Yükleniyor" sayfası ise erken çık
+      const pageTitle = await page.title().catch(() => '');
+      if (pageTitle.includes('Yükleniyor') || pageTitle === '') {
+        this.logger.warn(
+          'Sahibinden bot-detection engeli tespit edildi (Distil/Imperva). ' +
+          'Bu kaynak atlanıyor. Çözüm: Residential proxy veya manuel tarama gerekli.',
+          { url: ilkUrl, title: pageTitle }
+        );
+        return;
+      }
+
       // Toplam sayfa sayısını bul
       const toplamSayfa = await this.getTotalPages(page);
       const taranacakSayfa = Math.min(toplamSayfa, config.scraper.maxPages);
