@@ -13,14 +13,18 @@ export class HepsiemlakScraper extends BaseScraper {
   get baseUrl(): string { return 'https://www.hepsiemlak.com'; }
 
   private readonly KATEGORILER = [
-    { yol: '/satilik-daireler', tip: 'satilik' as const },
-    { yol: '/kiralik-daireler', tip: 'kiralik' as const },
+    { suf: 'satilik-daireler', tip: 'satilik' as const },
+    { suf: 'kiralik-daireler', tip: 'kiralik' as const },
   ];
 
   async scrape(): Promise<void> {
+    const cities = config.scraper.cities;
     for (const kat of this.KATEGORILER) {
-      await this.scrapeKategori(kat.yol, kat.tip);
-      await new Promise(r => setTimeout(r, config.scraper.delayMax));
+      for (const city of cities) {
+        const yol = `/${city}-${kat.suf}`;
+        await this.scrapeKategori(yol, kat.tip);
+        await new Promise(r => setTimeout(r, config.scraper.delayMax));
+      }
     }
   }
 
