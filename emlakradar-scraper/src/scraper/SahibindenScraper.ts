@@ -39,6 +39,8 @@ export class SahibindenScraper extends BaseScraper {
     try {
       const ilkUrl = `${this.baseUrl}${yol}`;
       await this.navigateWithFlareSolverr(page, ilkUrl);
+      // JS render bekleniyor — ilan satırları yüklensin
+      await page.waitForSelector('tr.searchResultsItem', { timeout: 15000 }).catch(() => {});
 
       // Toplam sayfa sayısını bul
       const toplamSayfa = await this.getTotalPages(page);
@@ -53,6 +55,7 @@ export class SahibindenScraper extends BaseScraper {
 
         if (sayfa > 1) {
           await this.navigateWithFlareSolverr(page, sayfaUrl);
+          await page.waitForSelector('tr.searchResultsItem', { timeout: 15000 }).catch(() => {});
         }
 
         await this.scrollPage(page);

@@ -13,15 +13,16 @@ export class HepsiemlakScraper extends BaseScraper {
   get baseUrl(): string { return 'https://www.hepsiemlak.com'; }
 
   private readonly KATEGORILER = [
-    { suf: 'satilik-daireler', tip: 'satilik' as const },
-    { suf: 'kiralik-daireler', tip: 'kiralik' as const },
+    { tip: 'satilik' as const },
+    { tip: 'kiralik' as const },
   ];
 
   async scrape(): Promise<void> {
     const cities = config.scraper.cities;
     for (const kat of this.KATEGORILER) {
       for (const city of cities) {
-        const yol = `/${city}-${kat.suf}`;
+        // Yeni URL formatı: /canakkale-satilik/daire
+        const yol = `/${city}-${kat.tip}/daire`;
         await this.scrapeKategori(yol, kat.tip);
         await new Promise(r => setTimeout(r, config.scraper.delayMax));
       }
@@ -35,6 +36,11 @@ export class HepsiemlakScraper extends BaseScraper {
       const ilkUrl = `${this.baseUrl}${yol}`;
       this.logger.info(`Hepsiemlak URL: ${ilkUrl}`);
       await this.navigateWithFlareSolverr(page, ilkUrl);
+      // Listing elementlerinin yüklenmesini bekle
+      await page.waitForSelector(
+        '.listing-item, .listing-item-v2, [data-id], li[data-cid], article[class*="listing"], [class*="card-listing"]',
+        { timeout: 15000 }
+      ).catch(() => {});
 
       const toplamSayfa = await this.getTotalPages(page);
       const taranacak = Math.min(toplamSayfa, config.scraper.maxPages);
@@ -43,7 +49,13 @@ export class HepsiemlakScraper extends BaseScraper {
 
       for (let sayfa = 1; sayfa <= taranacak; sayfa++) {
         const sayfaUrl = sayfa === 1 ? ilkUrl : `${ilkUrl}?page=${sayfa}`;
-        if (sayfa > 1) await this.navigateWithFlareSolverr(page, sayfaUrl);
+        if (sayfa > 1) {
+          await this.navigateWithFlareSolverr(page, sayfaUrl);
+          await page.waitForSelector(
+            '.listing-item, .listing-item-v2, [data-id], li[data-cid], article[class*="listing"], [class*="card-listing"]',
+            { timeout: 15000 }
+          ).catch(() => {});
+        }
 
         await this.scrollPage(page);
 
@@ -92,7 +104,10 @@ export class HepsiemlakScraper extends BaseScraper {
 
   private async getTotalPages(page: Page): Promise<number> {
     try {
-      const text = await page.$eval('.total-count, [data-ga-category="listing-count"]', el => el.textContent?.trim() ?? '0');
+      const text = await page.$eval(
+        '.total-count, [data-ga-category="listing-count"], [class*="result-count"], [class*="listing-count"], [class*="total-result"], .result-text',
+        el => el.textContent?.trim() ?? '0'
+      );
       const sayi = parseInt(text.replace(/[^\d]/g, '')) || 0;
       return Math.ceil(sayi / ITEMS_PER_PAGE);
     } catch {
@@ -152,6 +167,10 @@ export class HepsiemlakScraper extends BaseScraper {
         '[data-cid]',
         '.he-listing',
         '.search-results-item',
+        '[class*="listing-card"]',
+        '[class*="card-listing"]',
+        'li[class*="listing"]',
+        'article[class*="listing"]',
       ];
 
       let kartlar: NodeListOf<Element> | null = null;

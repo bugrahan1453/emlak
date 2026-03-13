@@ -144,34 +144,72 @@ export abstract class BaseScraper {
   }
 
   /**
-   * FlareSolverr üzerinden HTML alır, page.setContent() ile Puppeteer'a yükler.
-   * Sahibinden gibi bot tespiti yapan siteler için kullanılır.
+   * FlareSolverr üzerinden CF cookie alır, Puppeteer'a inject eder ve gerçek navigasyon yapar.
+   * page.setContent() yerine page.goto() kullanılır — JS render edilsin.
    */
   protected async navigateWithFlareSolverr(page: Page, url: string, waitMs?: [number, number]): Promise<void> {
     this.logger.info(`FlareSolverr ile yükleniyor: ${url}`);
     const result = await solveCloudflare(url);
 
-    if (!result || !result.html) {
+    if (!result) {
       this.logger.warn('FlareSolverr başarısız, normal navigasyon deneniyor');
       await this.navigateTo(page, url, waitMs);
       return;
     }
 
-    await page.setContent(result.html, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    this.logger.info(`FlareSolverr HTML yüklendi (${result.html.length} byte): ${url}`);
+    // CF cookie + UA'yı Puppeteer'a inject et
+    if (result.cookies.length > 0) {
+      const puppeteerCookies = result.cookies.map((c: FlareCookie) => ({
+        name: c.name,
+        value: c.value,
+        domain: c.domain.startsWith('.') ? c.domain : `.${c.domain}`,
+        path: c.path || '/',
+        expires: c.expires > 0 ? c.expires : undefined,
+        httpOnly: c.httpOnly,
+        secure: c.secure,
+        sameSite: (c.sameSite as 'Strict' | 'Lax' | 'None') || 'Lax',
+      }));
+      await page.setCookie(...puppeteerCookies);
+    }
+    if (result.userAgent) {
+      await page.setUserAgent(result.userAgent);
+    }
+
+    // Gerçek navigasyon — JS çalışsın, içerik render edilsin
+    try {
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      this.logger.info(`FlareSolverr cookie ile sayfa yüklendi: ${url}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Navigasyon hatası, HTML fallback: ${msg}`);
+      if (result.html) {
+        await page.setContent(result.html, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      }
+    }
 
     const [min, max] = waitMs ?? [config.scraper.delayMin, config.scraper.delayMax];
     await randomDelay(min, max);
+    await randomMouseMove(page);
   }
 
   /**
    * İlanları işle: analiz et, kaydet, gönder
    */
   protected async processIlanlar(ilanlar: IlanVeri[]): Promise<void> {
+    // Aynı scrape turu içinde yinelenen kaynak_id'leri temizle
+    const tekIlanlar: IlanVeri[] = [];
+    const turundeGoruldu = new Set<string>();
+    for (const ilan of ilanlar) {
+      if (!turundeGoruldu.has(ilan.kaynak_id)) {
+        turundeGoruldu.add(ilan.kaynak_id);
+        tekIlanlar.push(ilan);
+      }
+    }
+
     const yeniIlanlar: IlanVeri[] = [];
     const tumMevcut = Array.from(this.seenIlanlar.values());
 
-    for (const ilan of ilanlar) {
+    for (const ilan of tekIlanlar) {
       this.stats.bulunan_ilan++;
 
       // Sahte ilan analizi

@@ -146,7 +146,13 @@ export class EmlakjetScraper extends BaseScraper {
         }
       });
 
-      return ilanlar;
+      // Aynı sayfada aynı ID'li birden fazla element olabilir — tekilleştir
+      const seenIds = new Set<string>();
+      return ilanlar.filter(i => {
+        if (seenIds.has(i.kaynak_id)) return false;
+        seenIds.add(i.kaynak_id);
+        return true;
+      });
     }, this.baseUrl, tip) as Promise<IlanVeri[]>;
   }
 }
