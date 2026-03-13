@@ -59,7 +59,7 @@ chrome.alarms.onAlarm.addListener(async alarm => {
 // ─── Popup Mesajları ──────────────────────────────────────────────────────────
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'manual_scrape') {
-    runAllScrapers()
+    runAllScrapers(true) // force=true → toggle'ı atla
       .then(() => sendResponse({ ok: true }))
       .catch(err => sendResponse({ ok: false, error: err.message }));
     return true;
@@ -73,10 +73,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 });
 
 // ─── Ana Koordinatör ──────────────────────────────────────────────────────────
-async function runAllScrapers() {
+async function runAllScrapers(force = false) {
   const cfg = await getConfig();
 
-  if (!cfg.enabled) {
+  if (!force && !cfg.enabled) {
     console.log('[EmlakRadar] Devre dışı — atlandı');
     return;
   }

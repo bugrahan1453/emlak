@@ -81,25 +81,43 @@ $('save-btn').addEventListener('click', () => {
 
 // ─── Manuel Tara ──────────────────────────────────────────────────────────────
 $('scrape-btn').addEventListener('click', () => {
+  const apiUrl        = $('apiUrl').value.trim();
+  const webhookSecret = $('webhookSecret').value.trim();
+
+  if (!apiUrl)        { showMsg('Önce API URL gir ve Kaydet!', 'error'); return; }
+  if (!webhookSecret) { showMsg('Önce Webhook Secret gir ve Kaydet!', 'error'); return; }
+
+  // Önce ayarları kaydet, sonra tara
+  const cfg = {
+    apiUrl,
+    webhookSecret,
+    cities:          $('cities').value.trim() || 'canakkale',
+    intervalMinutes: parseInt($('intervalMinutes').value) || 10,
+    maxPages:        parseInt($('maxPages').value) || 3,
+    enabled:         $('enabled').checked,
+  };
+
   const btn = $('scrape-btn');
   btn.disabled    = true;
   btn.textContent = '⏳ Tarıyor...';
-  showMsg('Tarama başlatıldı — sekmeler arka planda açılacak', 'info');
 
-  chrome.runtime.sendMessage({ type: 'manual_scrape' }, res => {
-    btn.disabled    = false;
-    btn.textContent = '▶ Şimdi Tara';
+  chrome.storage.sync.set(cfg, () => {
+    showMsg('Tarama başlatıldı — arka planda sekmeler açılacak', 'info');
 
-    if (chrome.runtime.lastError || !res?.ok) {
-      showMsg(`Hata: ${res?.error || chrome.runtime.lastError?.message || 'bilinmiyor'}`, 'error');
-    } else {
-      // Durumu güncelle
-      chrome.runtime.sendMessage({ type: 'get_status' }, data => {
-        if (chrome.runtime.lastError) return;
-        $('last-time').textContent  = formatTime(data.lastScrapeTime);
-        $('last-count').textContent = data.lastScrapeCount != null ? `${data.lastScrapeCount}` : '—';
-      });
-      showMsg('✓ Tarama tamamlandı', 'ok');
-    }
+    chrome.runtime.sendMessage({ type: 'manual_scrape' }, res => {
+      btn.disabled    = false;
+      btn.textContent = '▶ Şimdi Tara';
+
+      if (chrome.runtime.lastError || !res?.ok) {
+        showMsg(`Hata: ${res?.error || chrome.runtime.lastError?.message || 'bilinmiyor'}`, 'error');
+      } else {
+        chrome.runtime.sendMessage({ type: 'get_status' }, data => {
+          if (chrome.runtime.lastError) return;
+          $('last-time').textContent  = formatTime(data.lastScrapeTime);
+          $('last-count').textContent = data.lastScrapeCount != null ? `${data.lastScrapeCount}` : '—';
+        });
+        showMsg('✓ Tarama tamamlandı', 'ok');
+      }
+    });
   });
 });
