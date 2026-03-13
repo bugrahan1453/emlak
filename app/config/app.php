@@ -4,7 +4,7 @@
  */
 
 // Uygulama temel URL'si (trailing slash olmadan)
-define('APP_URL',     rtrim(getenv('APP_URL') ?: 'http://localhost/emlakradar/public_html', '/'));
+define('APP_URL',     rtrim(getenv('APP_URL') ?: 'https://hetagayrimenkul.com', '/'));
 define('APP_NAME',    'EmlakRadar Pro');
 define('APP_VERSION', '1.0.0');
 define('APP_LOCALE',  'tr_TR');

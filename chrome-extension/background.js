@@ -92,26 +92,37 @@ async function runAllScrapers(force = false) {
 
   console.log(`[EmlakRadar] Scrape başladı — ${jobs.length} iş, şehirler: ${cities.join(', ')}`);
 
+  // ── Tek sekme aç, tüm işleri sırayla o sekmede yap ──────────────────────
+  const tab = await createTab(jobs[0].url);
+  const tabId = tab.id;
   let toplamYeni = 0;
 
-  for (const job of jobs) {
-    try {
-      const ilanlar = await scrapeTab(job);
-      const yeniler  = await filterYeni(ilanlar);
+  try {
+    for (let i = 0; i < jobs.length; i++) {
+      const job = jobs[i];
+      try {
+        // İlk iş zaten yüklü, diğerleri için navigate et
+        if (i > 0) await navigateTab(tabId, job.url);
 
-      if (yeniler.length > 0) {
-        await sendWebhook(yeniler, cfg);
-        await markGoruldu(yeniler);
-        toplamYeni += yeniler.length;
+        const ilanlar = await injectAndCollect(tabId, job);
+        const yeniler = await filterYeni(ilanlar);
+
+        if (yeniler.length > 0) {
+          await sendWebhook(yeniler, cfg);
+          await markGoruldu(yeniler);
+          toplamYeni += yeniler.length;
+        }
+
+        console.log(`[EmlakRadar] ${job.site} | ${job.tip} | ${job.city} → ${ilanlar.length} ilan, ${yeniler.length} yeni`);
+      } catch (err) {
+        console.error(`[EmlakRadar] Hata (${job.site}):`, err.message);
+        await chrome.storage.local.set({ lastError: `${job.site}: ${err.message}` });
       }
 
-      console.log(`[EmlakRadar] ${job.site} | ${job.tip} | ${job.city} → ${ilanlar.length} ilan, ${yeniler.length} yeni`);
-    } catch (err) {
-      console.error(`[EmlakRadar] Hata (${job.site} ${job.url}):`, err.message);
-      await chrome.storage.local.set({ lastError: `${job.site}: ${err.message}` });
+      await sleep(1500 + Math.random() * 1500);
     }
-
-    await sleep(2000 + Math.random() * 3000);
+  } finally {
+    chrome.tabs.remove(tabId).catch(() => {});
   }
 
   await chrome.storage.local.set({
@@ -157,57 +168,75 @@ function buildJobs(cities, maxPages) {
   return jobs;
 }
 
-// ─── Tab Aç + Scrape Et ───────────────────────────────────────────────────────
-function scrapeTab(job) {
-  return new Promise((resolve, reject) => {
-    let tabId    = null;
-    let done     = false;
+// ─── Tek Sekme Yardımcıları ───────────────────────────────────────────────────
 
-    const finish = (ilanlar) => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      chrome.tabs.onUpdated.removeListener(onUpdated);
-      chrome.runtime.onMessage.removeListener(onMsg);
-      if (tabId !== null) chrome.tabs.remove(tabId).catch(() => {});
-      resolve(ilanlar);
-    };
+// Yeni sekme aç ve yüklenmesini bekle
+function createTab(url) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.create({ url, active: false }, tab => {
+      if (chrome.runtime.lastError) { reject(new Error(chrome.runtime.lastError.message)); return; }
+
+      function onUpdated(tabId, info) {
+        if (tabId !== tab.id || info.status !== 'complete') return;
+        chrome.tabs.onUpdated.removeListener(onUpdated);
+        resolve(tab);
+      }
+      chrome.tabs.onUpdated.addListener(onUpdated);
+    });
+  });
+}
+
+// Mevcut sekmeyi yeni URL'ye yönlendir ve yüklenmesini bekle
+function navigateTab(tabId, url) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.update(tabId, { url }, () => {
+      if (chrome.runtime.lastError) { reject(new Error(chrome.runtime.lastError.message)); return; }
+
+      function onUpdated(updatedId, info) {
+        if (updatedId !== tabId || info.status !== 'complete') return;
+        chrome.tabs.onUpdated.removeListener(onUpdated);
+        resolve();
+      }
+      chrome.tabs.onUpdated.addListener(onUpdated);
+    });
+  });
+}
+
+// Sekmeye content script inject et ve sonucu bekle
+function injectAndCollect(tabId, job) {
+  return new Promise(resolve => {
+    let done = false;
 
     const timer = setTimeout(() => {
+      if (done) return;
+      done = true;
+      chrome.runtime.onMessage.removeListener(onMsg);
       console.warn(`[EmlakRadar] Timeout: ${job.url}`);
-      finish([]);
+      resolve([]);
     }, 90000);
 
     function onMsg(msg, sender) {
-      if (sender.tab?.id !== tabId) return;
-      if (msg.type !== 'emlakradar_result') return;
-      finish(msg.ilanlar || []);
-    }
-
-    function onUpdated(updatedTabId, info) {
-      if (updatedTabId !== tabId || info.status !== 'complete') return;
-
-      // Content script inject et
-      const fn = getContentFn(job.site);
-      chrome.scripting.executeScript({
-        target: { tabId },
-        func:   fn,
-        args:   [job.tip, job.city, job.maxPages],
-      }).catch(err => {
-        console.error('[EmlakRadar] executeScript hata:', err.message);
-        finish([]);
-      });
+      if (sender.tab?.id !== tabId || msg.type !== 'emlakradar_result') return;
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      chrome.runtime.onMessage.removeListener(onMsg);
+      resolve(msg.ilanlar || []);
     }
 
     chrome.runtime.onMessage.addListener(onMsg);
-    chrome.tabs.onUpdated.addListener(onUpdated);
 
-    chrome.tabs.create({ url: job.url, active: false }, tab => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-      tabId = tab.id;
+    chrome.scripting.executeScript({
+      target: { tabId },
+      func:   getContentFn(job.site),
+      args:   [job.tip, job.city, job.maxPages],
+    }).catch(err => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      chrome.runtime.onMessage.removeListener(onMsg);
+      console.error('[EmlakRadar] executeScript hata:', err.message);
+      resolve([]);
     });
   });
 }
