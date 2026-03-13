@@ -721,18 +721,16 @@ async function emlakjetScript(tip, kategori, city) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function sahibindenDetailScript() {
-  async function waitFor(selector, ms = 20000) {
+  // ─── Yardımcılar ────────────────────────────────────────────────────────────
+  async function waitFor(selector, ms = 25000) {
     const start = Date.now();
     while (Date.now() - start < ms) {
       if (document.querySelector(selector)) return true;
-      await new Promise(r => setTimeout(r, 1000));
+      await new Promise(r => setTimeout(r, 800));
     }
     return false;
   }
 
-  await waitFor('.classifiedDetailMainPhoto, .classified-detail, h1.classifiedDetailTitle', 20000);
-
-  // İnsan gibi scroll
   async function humanScroll() {
     const total = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
     const step  = () => 110 + Math.random() * 110;
@@ -747,77 +745,167 @@ async function sahibindenDetailScript() {
     }
     await new Promise(r => setTimeout(r, 400)); window.scrollTo(0, 0); await new Promise(r => setTimeout(r, 200));
   }
+
+  // Thumbnail URL'ini tam boya çevir
+  function toFullSize(url) {
+    if (!url) return url;
+    // sahibinden CDN: /thumb/ → / veya ?width=X kaldır
+    return url
+      .replace(/\/thumb\//g, '/')
+      .replace(/[?&]width=\d+(&height=\d+)?/g, '')
+      .replace(/[?&]height=\d+/g, '')
+      .replace(/_kucuk(\.\w+)$/i, '$1')
+      .replace(/_small(\.\w+)$/i, '$1')
+      .replace(/[?&]$/, '');
+  }
+
+  // ─── Sayfa yüklensin ────────────────────────────────────────────────────────
+  await waitFor('h1.classifiedDetailTitle, h1[class*="title"], .classifiedDetailMainPhoto', 25000);
+  await new Promise(r => setTimeout(r, 1000)); // JS render tamamlansın
   await humanScroll();
+  await new Promise(r => setTimeout(r, 500)); // Lazy load tetiklensin
 
-  // Açıklama
-  const aciklama = (
-    document.querySelector('.classifiedDescription')?.textContent?.trim() ||
-    document.querySelector('[class*="description"]')?.textContent?.trim() || ''
-  ).substring(0, 3000);
-
-  // Tüm fotoğraflar (carousel)
+  // ─── 1. FOTOĞRAFLAR — 4 farklı yöntemle al, en iyisini kullan ──────────────
+  const seen = new Set();
   const imgs = [];
-  const fotoSels = [
-    'img.lazy[data-src]', 'img[data-lazy]',
-    '.classifiedDetailMainPhotos img',
-    '.lightBoxImage', 'img[src*="cdn.dsmcdn"]',
-    'img[src*="hizliresim"]',
-  ];
-  fotoSels.forEach(sel => {
-    document.querySelectorAll(sel).forEach(img => {
-      const src = img.getAttribute('data-src') || img.getAttribute('data-lazy') || img.src || '';
-      if (src && src.startsWith('http') && !src.includes('blank') && !src.includes('/assets/') && !imgs.includes(src))
-        imgs.push(src);
+  function addImg(url) {
+    if (!url || !url.startsWith('http')) return;
+    const u = toFullSize(url);
+    // Thumbnail/asset/blank filtreleme
+    if (seen.has(u)) return;
+    if (/blank|placeholder|no.image|spacer|\/assets\/|favicon/i.test(u)) return;
+    if (u.length < 30) return;
+    seen.add(u); imgs.push(u);
+  }
+
+  // Yöntem 1: Thumbnail şeridi <a href> linkleri → tam boy URL (EN GÜVENİLİR)
+  document.querySelectorAll(
+    '.classifiedDetailMainPhotosSmall a, ' +
+    '.classified-detail-thumbnails a, ' +
+    '.photo-list a, ' +
+    '[class*="thumbnails"] a[href*="jpg"], [class*="thumbnails"] a[href*="jpeg"], ' +
+    '[class*="thumbnails"] a[href*="png"], [class*="thumbnails"] a[href*="webp"]'
+  ).forEach(a => addImg(a.getAttribute('href')));
+
+  // Yöntem 2: Ana galeri img data-src (lazy loaded)
+  document.querySelectorAll(
+    '#classifiedDetailMainPhotos img, ' +
+    '.classifiedDetailMainPhotos img, ' +
+    '[class*="mainPhoto"] img, ' +
+    '[id*="mainPhoto"] img'
+  ).forEach(img => {
+    addImg(img.getAttribute('data-src') || img.getAttribute('data-lazy') || img.getAttribute('src'));
+  });
+
+  // Yöntem 3: Swiper/carousel slide'ları
+  document.querySelectorAll(
+    '.swiper-slide img, [class*="slider"] img, [class*="carousel"] img, ' +
+    '[class*="gallery"] img, [class*="photo-item"] img'
+  ).forEach(img => {
+    addImg(img.getAttribute('data-src') || img.getAttribute('data-lazy') || img.getAttribute('src'));
+  });
+
+  // Yöntem 4: Sayfa içi JSON/script etiketlerinden foto URL'leri çek
+  if (imgs.length < 2) {
+    document.querySelectorAll('script').forEach(s => {
+      const txt = s.textContent || '';
+      if (!txt.includes('photo') && !txt.includes('image') && !txt.includes('foto')) return;
+      const matches = txt.matchAll(/"(https?:\/\/[^"]+\.(?:jpg|jpeg|png|webp))"/gi);
+      for (const m of matches) addImg(m[1]);
     });
-  });
+  }
 
-  // Özellik tablosu
+  // ─── 2. AÇIKLAMA ────────────────────────────────────────────────────────────
+  const aciklama = (
+    document.querySelector('#classifiedDescription')?.textContent?.trim() ||
+    document.querySelector('.classifiedDescription')?.textContent?.trim() ||
+    document.querySelector('[id*="description"], [class*="description"]')?.textContent?.trim() ||
+    ''
+  ).substring(0, 5000);
+
+  // ─── 3. ÖZELLİK TABLOSU ─────────────────────────────────────────────────────
   const attrs = {};
-  document.querySelectorAll('.classified-info-list li, .classifiedInfoList li').forEach(li => {
-    const label = li.querySelector('.classified-info-list-item-title, strong')?.textContent?.trim();
-    const value = li.querySelector('.classified-info-list-item-value, span:last-child')?.textContent?.trim();
-    if (label && value) attrs[label.toLowerCase()] = value;
+
+  // Format A: <li><span class="title">X</span><span class="value">Y</span></li>
+  document.querySelectorAll('.classifiedInfoList li, .classified-info-list li').forEach(li => {
+    const spans = li.querySelectorAll('span');
+    if (spans.length >= 2) {
+      attrs[spans[0].textContent.trim().toLowerCase()] = spans[spans.length - 1].textContent.trim();
+    } else {
+      const parts = li.textContent.split(':').map(s => s.trim());
+      if (parts.length >= 2) attrs[parts[0].toLowerCase()] = parts.slice(1).join(':').trim();
+    }
   });
 
-  // Alternatif tablo formatı
-  document.querySelectorAll('table tr').forEach(tr => {
+  // Format B: <dl> <dt>etiket</dt><dd>değer</dd>
+  document.querySelectorAll('dl dt').forEach(dt => {
+    const dd = dt.nextElementSibling;
+    if (dd?.tagName === 'DD') attrs[dt.textContent.trim().toLowerCase()] = dd.textContent.trim();
+  });
+
+  // Format C: <table> satırları
+  document.querySelectorAll('table.classifiedInfo tr, table[class*="property"] tr, table[class*="detail"] tr').forEach(tr => {
     const cells = tr.querySelectorAll('td');
     if (cells.length >= 2) attrs[cells[0].textContent.trim().toLowerCase()] = cells[1].textContent.trim();
   });
 
-  // Satıcı bilgisi
-  const satici_ad  = document.querySelector('.username, .user-info-name, [class*="user-name"]')?.textContent?.trim() || '';
-  const satici_tel = document.querySelector('a[href^="tel:"]')?.textContent?.trim() ||
-                     document.querySelector('[class*="phone"]')?.textContent?.trim() || '';
-
-  // Konum
-  const lat = parseFloat(document.querySelector('[data-lat]')?.getAttribute('data-lat') ||
-              document.querySelector('input[name="lat"]')?.value || '') || null;
-  const lng = parseFloat(document.querySelector('[data-lng]')?.getAttribute('data-lng') ||
-              document.querySelector('input[name="lng"]')?.value || '') || null;
+  // Format D: satır bazlı key/value div'ler
+  document.querySelectorAll('[class*="property-row"], [class*="detail-row"], [class*="info-row"]').forEach(row => {
+    const label = row.querySelector('[class*="label"], [class*="title"], [class*="key"]')?.textContent?.trim();
+    const value = row.querySelector('[class*="value"], [class*="data"]')?.textContent?.trim();
+    if (label && value) attrs[label.toLowerCase()] = value;
+  });
 
   function findAttr(...keys) {
     for (const k of keys) {
-      const v = attrs[k] || attrs[k + ':'] || '';
-      if (v) return v;
+      for (const attrKey of Object.keys(attrs)) {
+        if (attrKey.includes(k)) return attrs[attrKey];
+      }
     }
     return null;
   }
+
+  // ─── 4. SATICI ──────────────────────────────────────────────────────────────
+  const satici_ad = (
+    document.querySelector('.username')?.textContent?.trim() ||
+    document.querySelector('[id*="username"], [class*="username"]')?.textContent?.trim() ||
+    document.querySelector('[class*="advertiser-name"], [class*="owner-name"], [class*="seller-name"]')?.textContent?.trim() ||
+    ''
+  ).replace(/\s+/g, ' ');
+
+  // Telefon: önce href="tel:" bağlantısı, yoksa gizlenmiş numara
+  const telEl = document.querySelector('a[href^="tel:"]');
+  const satici_tel = (
+    (telEl?.getAttribute('href') || '').replace('tel:', '').trim() ||
+    telEl?.textContent?.trim() ||
+    document.querySelector('[class*="phone"], [class*="tel"]')?.textContent?.trim() ||
+    ''
+  ).replace(/\s+/g, '');
+
+  // ─── 5. KOORDİNAT ───────────────────────────────────────────────────────────
+  const lat = parseFloat(
+    document.querySelector('[data-lat]')?.getAttribute('data-lat') ||
+    document.querySelector('input[name="lat"]')?.value || ''
+  ) || null;
+  const lng = parseFloat(
+    document.querySelector('[data-lng]')?.getAttribute('data-lng') ||
+    document.querySelector('input[name="lng"]')?.value || ''
+  ) || null;
 
   chrome.runtime.sendMessage({
     type: 'emlakradar_detail',
     data: {
       aciklama,
       fotograflar: imgs,
-      oda_sayisi:  findAttr('oda sayısı', 'oda', 'oda sayisi'),
-      metrekare:   parseFloat((findAttr('m²', 'brüt', 'net m²', 'net') || '').replace(/[^\d,]/g,'').replace(',','.')) || null,
-      kat:         findAttr('bulunduğu kat', 'kat'),
-      bina_yasi:   findAttr('bina yaşı', 'bina yasi', 'bina yaşı'),
-      isitma:      findAttr('ısıtma', 'isitma'),
+      oda_sayisi:  findAttr('oda sayısı', 'oda sayisi', 'oda'),
+      metrekare:   parseFloat((findAttr('m²', 'brüt', 'net m²', 'alan') || '').replace(/[^\d,]/g, '').replace(',', '.')) || null,
+      kat:         findAttr('bulunduğu kat', 'kat bilgisi', 'kat'),
+      bina_yasi:   findAttr('bina yaşı', 'bina yasi', 'yapı yaşı'),
+      isitma:      findAttr('ısıtma', 'isitma', 'ısıtma tipi'),
       banyo:       findAttr('banyo sayısı', 'banyo'),
       satici_ad,
       satici_tel,
-      konum:       (lat && lng) ? { lat, lng } : null,
+      konum: (lat && lng) ? { lat, lng } : null,
     },
   });
 }
@@ -826,51 +914,81 @@ async function hepsiemlakDetailScript() {
   async function waitFor(ms = 20000) {
     const start = Date.now();
     while (Date.now() - start < ms) {
-      if (document.querySelector('[class*="detail"], [class*="Detail"], h1')) return true;
-      await new Promise(r => setTimeout(r, 1000));
+      if (document.querySelector('h1, [class*="detail"]')) return true;
+      await new Promise(r => setTimeout(r, 800));
     }
     return false;
   }
+  async function humanScroll() {
+    const total = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+    let pos = 0;
+    while (pos < total - 200) {
+      pos += 110 + Math.random() * 110; window.scrollTo(0, Math.min(pos, total));
+      if (Math.random() < 0.1) await new Promise(r => setTimeout(r, 700 + Math.random() * 900));
+      else                      await new Promise(r => setTimeout(r, 70 + Math.random() * 100));
+    }
+    await new Promise(r => setTimeout(r, 400)); window.scrollTo(0, 0); await new Promise(r => setTimeout(r, 200));
+  }
 
   await waitFor();
+  await new Promise(r => setTimeout(r, 800));
+  await humanScroll();
 
+  // Açıklama
   const aciklama = (
-    document.querySelector('[class*="description"], [class*="Description"], [class*="aciklama"]')?.textContent?.trim() || ''
-  ).substring(0, 3000);
+    document.querySelector('#description, [id*="description"], [class*="description"]')?.textContent?.trim() || ''
+  ).substring(0, 5000);
 
-  const imgs = [];
-  document.querySelectorAll('img[data-src], img[data-lazy], [class*="photo"] img, [class*="Photo"] img, [class*="gallery"] img').forEach(img => {
-    const src = img.getAttribute('data-src') || img.getAttribute('data-lazy') || img.src || '';
-    if (src && src.startsWith('http') && !src.includes('no-image') && !imgs.includes(src)) imgs.push(src);
+  // Fotoğraflar — önce <a href>, sonra img data-src
+  const seen = new Set(); const imgs = [];
+  function addImg(url) {
+    if (!url || !url.startsWith('http') || seen.has(url)) return;
+    if (/no.image|placeholder|blank|favicon/i.test(url) || url.length < 30) return;
+    seen.add(url); imgs.push(url);
+  }
+  document.querySelectorAll('[class*="gallery"] a, [class*="photo"] a, [class*="slider"] a').forEach(a => addImg(a.getAttribute('href')));
+  document.querySelectorAll('img[data-src], img[data-lazy], [class*="gallery"] img, [class*="photo"] img, [class*="slider"] img').forEach(img => {
+    addImg(img.getAttribute('data-src') || img.getAttribute('data-lazy') || img.src);
   });
+  if (imgs.length < 2) {
+    document.querySelectorAll('script').forEach(s => {
+      const matches = (s.textContent || '').matchAll(/"(https?:\/\/[^"]+\.(?:jpg|jpeg|png|webp))"/gi);
+      for (const m of matches) addImg(m[1]);
+    });
+  }
 
+  // Özellikler
   const attrs = {};
-  document.querySelectorAll('[class*="spec"] li, [class*="feature"] li, [class*="detail-item"], [class*="property-item"]').forEach(el => {
-    const txt = el.textContent.trim();
-    const parts = txt.split(/[:·]/).map(s => s.trim());
-    if (parts.length >= 2) attrs[parts[0].toLowerCase()] = parts.slice(1).join(' ');
+  document.querySelectorAll('li, [class*="spec"], [class*="feature"], [class*="detail-item"]').forEach(el => {
+    const label = el.querySelector('[class*="label"], [class*="title"], [class*="key"], span:first-child')?.textContent?.trim();
+    const value = el.querySelector('[class*="value"], span:last-child')?.textContent?.trim();
+    if (label && value && label !== value) attrs[label.toLowerCase()] = value;
+    else {
+      const parts = el.textContent.trim().split(/[:·]/).map(s => s.trim());
+      if (parts.length >= 2 && parts[0].length < 40) attrs[parts[0].toLowerCase()] = parts.slice(1).join(' ');
+    }
   });
-
-  const satici_ad  = document.querySelector('[class*="advertiser"], [class*="owner"], [class*="agent-name"]')?.textContent?.trim() || '';
-  const satici_tel = document.querySelector('a[href^="tel:"]')?.textContent?.trim() || '';
-
-  const lat = parseFloat(document.querySelector('[data-lat]')?.getAttribute('data-lat') || '') || null;
-  const lng = parseFloat(document.querySelector('[data-lng]')?.getAttribute('data-lng') || '') || null;
 
   function findAttr(...keys) {
-    for (const k of keys) { const v = attrs[k]; if (v) return v; }
+    for (const k of keys) for (const ak of Object.keys(attrs)) if (ak.includes(k)) return attrs[ak];
     return null;
   }
+
+  const satici_ad  = document.querySelector('[class*="advertiser"], [class*="owner"], [class*="agent"]')?.textContent?.trim()?.replace(/\s+/g,' ') || '';
+  const telEl = document.querySelector('a[href^="tel:"]');
+  const satici_tel = (telEl?.getAttribute('href') || '').replace('tel:','').trim() || telEl?.textContent?.trim() || '';
+  const lat = parseFloat(document.querySelector('[data-lat]')?.getAttribute('data-lat') || '') || null;
+  const lng = parseFloat(document.querySelector('[data-lng]')?.getAttribute('data-lng') || '') || null;
 
   chrome.runtime.sendMessage({
     type: 'emlakradar_detail',
     data: {
       aciklama, fotograflar: imgs,
       oda_sayisi: findAttr('oda sayısı', 'oda'),
-      metrekare:  parseFloat((findAttr('m²', 'brüt', 'net') || '').replace(/[^\d,]/g,'').replace(',','.')) || null,
+      metrekare:  parseFloat((findAttr('m²', 'brüt', 'net', 'alan') || '').replace(/[^\d,]/g,'').replace(',','.')) || null,
       kat:        findAttr('kat', 'bulunduğu kat'),
       bina_yasi:  findAttr('bina yaşı', 'yapı yaşı'),
-      isitma:     findAttr('ısıtma', 'isıtma tipi'),
+      isitma:     findAttr('ısıtma'),
       banyo:      findAttr('banyo'),
       satici_ad, satici_tel,
       konum: (lat && lng) ? { lat, lng } : null,
@@ -883,39 +1001,67 @@ async function emlakjetDetailScript() {
     const start = Date.now();
     while (Date.now() - start < ms) {
       if (document.querySelector('h1, [class*="detail"]')) return true;
-      await new Promise(r => setTimeout(r, 1000));
+      await new Promise(r => setTimeout(r, 800));
     }
     return false;
   }
+  async function humanScroll() {
+    const total = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+    let pos = 0;
+    while (pos < total - 200) {
+      pos += 110 + Math.random() * 110; window.scrollTo(0, Math.min(pos, total));
+      if (Math.random() < 0.1) await new Promise(r => setTimeout(r, 700 + Math.random() * 900));
+      else                      await new Promise(r => setTimeout(r, 70 + Math.random() * 100));
+    }
+    await new Promise(r => setTimeout(r, 400)); window.scrollTo(0, 0); await new Promise(r => setTimeout(r, 200));
+  }
 
   await waitFor();
+  await new Promise(r => setTimeout(r, 800));
+  await humanScroll();
 
   const aciklama = (
-    document.querySelector('[class*="description"], [class*="Description"]')?.textContent?.trim() || ''
-  ).substring(0, 3000);
+    document.querySelector('#description, [id*="description"], [class*="description"]')?.textContent?.trim() || ''
+  ).substring(0, 5000);
 
-  const imgs = [];
+  const seen = new Set(); const imgs = [];
+  function addImg(url) {
+    if (!url || !url.startsWith('http') || seen.has(url)) return;
+    if (/no.image|placeholder|blank|favicon/i.test(url) || url.length < 30) return;
+    seen.add(url); imgs.push(url);
+  }
+  document.querySelectorAll('[class*="gallery"] a, [class*="photo"] a, [class*="slider"] a').forEach(a => addImg(a.getAttribute('href')));
   document.querySelectorAll('img[data-src], img[data-lazy], [class*="gallery"] img, [class*="slider"] img, [class*="photo"] img').forEach(img => {
-    const src = img.getAttribute('data-src') || img.getAttribute('data-lazy') || img.src || '';
-    if (src && src.startsWith('http') && !src.includes('no-image') && !imgs.includes(src)) imgs.push(src);
+    addImg(img.getAttribute('data-src') || img.getAttribute('data-lazy') || img.src);
   });
+  if (imgs.length < 2) {
+    document.querySelectorAll('script').forEach(s => {
+      const matches = (s.textContent || '').matchAll(/"(https?:\/\/[^"]+\.(?:jpg|jpeg|png|webp))"/gi);
+      for (const m of matches) addImg(m[1]);
+    });
+  }
 
   const attrs = {};
-  document.querySelectorAll('[class*="spec"] li, [class*="feature"] li, [class*="attribute"] li, [class*="detail-row"]').forEach(el => {
-    const txt = el.textContent.trim();
-    const parts = txt.split(/[:·]/).map(s => s.trim());
-    if (parts.length >= 2) attrs[parts[0].toLowerCase()] = parts.slice(1).join(' ');
+  document.querySelectorAll('li, [class*="spec"], [class*="feature"], [class*="attribute"], [class*="detail-row"]').forEach(el => {
+    const label = el.querySelector('[class*="label"], [class*="title"], span:first-child')?.textContent?.trim();
+    const value = el.querySelector('[class*="value"], span:last-child')?.textContent?.trim();
+    if (label && value && label !== value) attrs[label.toLowerCase()] = value;
+    else {
+      const parts = el.textContent.trim().split(/[:·]/).map(s => s.trim());
+      if (parts.length >= 2 && parts[0].length < 40) attrs[parts[0].toLowerCase()] = parts.slice(1).join(' ');
+    }
   });
 
-  const satici_ad  = document.querySelector('[class*="agent"], [class*="owner"], [class*="advertiser"]')?.textContent?.trim() || '';
-  const satici_tel = document.querySelector('a[href^="tel:"]')?.textContent?.trim() || '';
-  const lat = parseFloat(document.querySelector('[data-lat]')?.getAttribute('data-lat') || '') || null;
-  const lng = parseFloat(document.querySelector('[data-lng]')?.getAttribute('data-lng') || '') || null;
-
   function findAttr(...keys) {
-    for (const k of keys) { const v = attrs[k]; if (v) return v; }
+    for (const k of keys) for (const ak of Object.keys(attrs)) if (ak.includes(k)) return attrs[ak];
     return null;
   }
+
+  const satici_ad  = document.querySelector('[class*="agent"], [class*="owner"], [class*="advertiser"]')?.textContent?.trim()?.replace(/\s+/g,' ') || '';
+  const telEl = document.querySelector('a[href^="tel:"]');
+  const satici_tel = (telEl?.getAttribute('href') || '').replace('tel:','').trim() || telEl?.textContent?.trim() || '';
+  const lat = parseFloat(document.querySelector('[data-lat]')?.getAttribute('data-lat') || '') || null;
+  const lng = parseFloat(document.querySelector('[data-lng]')?.getAttribute('data-lng') || '') || null;
 
   chrome.runtime.sendMessage({
     type: 'emlakradar_detail',
@@ -925,7 +1071,7 @@ async function emlakjetDetailScript() {
       metrekare:  parseFloat((findAttr('m²', 'alan', 'brüt') || '').replace(/[^\d,]/g,'').replace(',','.')) || null,
       kat:        findAttr('kat', 'bulunduğu kat'),
       bina_yasi:  findAttr('bina yaşı', 'yapı yaşı'),
-      isitma:     findAttr('ısıtma', 'isıtma'),
+      isitma:     findAttr('ısıtma'),
       banyo:      findAttr('banyo'),
       satici_ad, satici_tel,
       konum: (lat && lng) ? { lat, lng } : null,
