@@ -33,7 +33,8 @@ export class HepsiemlakScraper extends BaseScraper {
 
     try {
       const ilkUrl = `${this.baseUrl}${yol}`;
-      await this.navigateTo(page, ilkUrl);
+      this.logger.info(`Hepsiemlak URL: ${ilkUrl}`);
+      await this.navigateWithFlareSolverr(page, ilkUrl);
 
       const toplamSayfa = await this.getTotalPages(page);
       const taranacak = Math.min(toplamSayfa, config.scraper.maxPages);
@@ -42,7 +43,7 @@ export class HepsiemlakScraper extends BaseScraper {
 
       for (let sayfa = 1; sayfa <= taranacak; sayfa++) {
         const sayfaUrl = sayfa === 1 ? ilkUrl : `${ilkUrl}?page=${sayfa}`;
-        if (sayfa > 1) await this.navigateTo(page, sayfaUrl);
+        if (sayfa > 1) await this.navigateWithFlareSolverr(page, sayfaUrl);
 
         await this.scrollPage(page);
 
