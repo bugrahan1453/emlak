@@ -548,7 +548,9 @@ async function _runAllScrapersInner(force = false) {
             await navigateTab(tabId, nextUrl);
 
             if (await checkBotBlock(tabId)) {
+              const botMsg = `Bot bloğu/Cloudflare — sayfa atlandı: ${nextUrl}`;
               sendProgress(`⚠️ ${site} bot bloğu — site atlanıyor`, 'error');
+              await logError(site, 'bot_block_liste', botMsg);
               nextUrl = null; break;
             }
 
@@ -557,6 +559,11 @@ async function _runAllScrapersInner(force = false) {
             const rawIlanlar = (pageResult.ilanlar || []).map(validateListing).filter(Boolean);
             const ilanlar    = rawIlanlar;
             nextUrl          = pageResult.nextUrl || null;
+
+            sendProgress(`${site} · ${job.kategori} · sayfa ${page}: ${ilanlar.length} ilan bulundu`);
+            if (ilanlar.length === 0) {
+              await logError(site, 'selector_0', `${job.kategori} sayfa ${page} — 0 ilan (selector eşleşmedi veya sayfa yüklenemedi)`);
+            }
 
             await checkSelectorHealth(site, ilanlar.length);
 
