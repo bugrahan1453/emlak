@@ -64,10 +64,10 @@ require_once APP_DIR . '/views/layout/header.php';
             ?>
             <?php if (!empty($fotograflar)): ?>
             <div class="rounded-2xl overflow-hidden" style="background: rgba(15,23,62,0.6); border: 1px solid rgba(255,255,255,0.06);">
-                <div class="relative h-72 overflow-hidden cursor-pointer" @click="modalAcik = true">
+                <div class="relative overflow-hidden cursor-pointer" style="aspect-ratio:4/3; background:#0a0f2e;" @click="modalAcik = true">
                     <?php foreach ($fotograflar as $fi => $foto): ?>
                     <img src="<?= $fotoUrl($foto) ?>"
-                         class="absolute inset-0 w-full h-full object-cover transition-opacity duration-300"
+                         class="absolute inset-0 w-full h-full object-contain transition-opacity duration-300"
                          :class="aktifFoto === <?= $fi ?> ? 'opacity-100' : 'opacity-0'"
                          loading="lazy">
                     <?php endforeach; ?>

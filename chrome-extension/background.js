@@ -816,55 +816,65 @@ async function sahibindenDetailScript() {
   window.scrollTo(0, 0);
   await new Promise(r => setTimeout(r, 800)); // Lazy load tamamlansın
 
-  // ─── 1. FOTOĞRAFLAR — 4 farklı yöntemle al, en iyisini kullan ──────────────
+  // ─── 1. FOTOĞRAFLAR ──────────────────────────────────────────────────────────
   const seen = new Set();
   const imgs = [];
   function addImg(url) {
-    if (!url || !url.startsWith('http')) return;
-    const u = toFullSize(url);
-    // Thumbnail/asset/blank filtreleme
+    if (!url) return;
+    // Tam URL değilse atla
+    if (!url.startsWith('http') && !url.startsWith('//')) return;
+    const u = toFullSize(url.startsWith('//') ? 'https:' + url : url);
     if (seen.has(u)) return;
-    if (/blank|placeholder|no.image|spacer|\/assets\/|favicon/i.test(u)) return;
-    if (u.length < 30) return;
+    if (/blank|placeholder|no.image|spacer|\/assets\/|favicon|icon|logo/i.test(u)) return;
+    if (u.length < 20) return;
     seen.add(u); imgs.push(u);
   }
 
-  // Yöntem 1: Thumbnail şeridi <a href> linkleri → tam boy URL (EN GÜVENİLİR)
+  // Yöntem 1: Script tag'larından JSON veri — Sahibinden tüm fotoları buraya gömer
+  const allScriptText = Array.from(document.querySelectorAll('script')).map(s => s.textContent).join('\n');
+
+  // Sahibinden'in bilinen veri yapıları
+  const jsonPatterns = [
+    /classifiedDetailPhotos\s*=\s*(\[[\s\S]*?\]);/,
+    /"photos"\s*:\s*(\[[\s\S]*?\])/,
+    /window\.__INITIAL_STATE__\s*=\s*(\{[\s\S]{0,50000}\})/,
+  ];
+  for (const pat of jsonPatterns) {
+    const m = allScriptText.match(pat);
+    if (m) {
+      try {
+        const parsed = JSON.parse(m[1]);
+        const arr = Array.isArray(parsed) ? parsed : (parsed.photos || parsed.classifiedPhotos || []);
+        arr.forEach(p => {
+          if (typeof p === 'string') addImg(p);
+          else addImg(p.url || p.src || p.photoUrl || p.photo_url || p.originalUrl || '');
+        });
+      } catch (_) {}
+    }
+  }
+
+  // Yöntem 2: Tüm CDN URL'lerini script taglardan regex ile çek
+  const cdnMatches = allScriptText.matchAll(/(https?:\/\/[^"'\s,]+\.(?:jpg|jpeg|png|webp)(?:[^"'\s,]*)?)/gi);
+  for (const m of cdnMatches) addImg(m[1]);
+
+  // Yöntem 3: Thumbnail şeridi <a href> linkleri → tam boy URL
   document.querySelectorAll(
     '.classifiedDetailMainPhotosSmall a, ' +
+    '#classifiedDetailMainPhotosSmall a, ' +
     '.classified-detail-thumbnails a, ' +
-    '.photo-list a, ' +
-    '[class*="thumbnails"] a[href*="jpg"], [class*="thumbnails"] a[href*="jpeg"], ' +
-    '[class*="thumbnails"] a[href*="png"], [class*="thumbnails"] a[href*="webp"]'
+    '[class*="thumbnails"] a'
   ).forEach(a => addImg(a.getAttribute('href')));
 
-  // Yöntem 2: Ana galeri img data-src (lazy loaded)
-  document.querySelectorAll(
-    '#classifiedDetailMainPhotos img, ' +
-    '.classifiedDetailMainPhotos img, ' +
-    '[class*="mainPhoto"] img, ' +
-    '[id*="mainPhoto"] img'
-  ).forEach(img => {
+  // Yöntem 4: Tüm img data-src / data-lazy / src — DOM'daki yüklü resimler
+  document.querySelectorAll('img').forEach(img => {
     addImg(img.getAttribute('data-src') || img.getAttribute('data-lazy') || img.getAttribute('src'));
   });
 
-  // Yöntem 3: Swiper/carousel slide'ları
-  document.querySelectorAll(
-    '.swiper-slide img, [class*="slider"] img, [class*="carousel"] img, ' +
-    '[class*="gallery"] img, [class*="photo-item"] img'
-  ).forEach(img => {
-    addImg(img.getAttribute('data-src') || img.getAttribute('data-lazy') || img.getAttribute('src'));
+  // Yöntem 5: Tüm <a href> içinde resim URL'leri
+  document.querySelectorAll('a[href]').forEach(a => {
+    const h = a.getAttribute('href') || '';
+    if (/\.(jpg|jpeg|png|webp)/i.test(h)) addImg(h);
   });
-
-  // Yöntem 4: Sayfa içi JSON/script etiketlerinden foto URL'leri çek
-  if (imgs.length < 2) {
-    document.querySelectorAll('script').forEach(s => {
-      const txt = s.textContent || '';
-      if (!txt.includes('photo') && !txt.includes('image') && !txt.includes('foto')) return;
-      const matches = txt.matchAll(/"(https?:\/\/[^"]+\.(?:jpg|jpeg|png|webp))"/gi);
-      for (const m of matches) addImg(m[1]);
-    });
-  }
 
   // ─── 2. AÇIKLAMA ────────────────────────────────────────────────────────────
   const aciklama = (
