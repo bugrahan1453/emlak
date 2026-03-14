@@ -106,7 +106,7 @@ function refreshStatus() {
 document.addEventListener('DOMContentLoaded', () => {
   chrome.storage.sync.get({
     cities: 'canakkale', intervalMinutes: 10, gunAraligi: 0,
-    captchaSolver: '', captchaApiKey: '',
+    captchaSolver: 'capmonster', captchaApiKey: 'e74a9d8cc30974c3f226b86abaebc3d0',
   }, cfg => {
     $('cities').value          = cfg.cities;
     $('intervalMinutes').value = cfg.intervalMinutes;

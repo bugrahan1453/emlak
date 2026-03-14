@@ -37,8 +37,8 @@ function getConfig() {
       intervalMinutes: 10,
       enabled:         true,
       gunAraligi:      1,
-      captchaSolver:   '',   // 'capmonster' | 'capsolver' | '2captcha' | ''
-      captchaApiKey:   '',
+      captchaSolver:   'capmonster',
+      captchaApiKey:   'e74a9d8cc30974c3f226b86abaebc3d0',
     }, resolve);
   });
 }
