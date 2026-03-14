@@ -107,6 +107,9 @@ async function checkBotBlock(tabId) {
 // ─── Ana Koordinatör ──────────────────────────────────────────────────────────
 let isRunning = false;
 
+const SITE_DETAIL_LIMIT = 10; // Site başına max detay sayısı
+const SITE_ORDER = ['sahibinden', 'hepsiemlak', 'emlakjet'];
+
 async function runAllScrapers(force = false) {
   if (isRunning) { console.log('[EmlakRadar] Zaten çalışıyor, atlandı'); return; }
   const cfg = await getConfig();
@@ -118,58 +121,76 @@ async function runAllScrapers(force = false) {
   const cities = cfg.cities.split(',').map(c => c.trim().toLowerCase()).filter(Boolean);
   const jobs   = buildJobs(cities, MAX_PAGES);
 
-  console.log(`[EmlakRadar] Başladı — ${jobs.length} iş`);
-  sendProgress(`Başlıyor... ${cities.join(', ')} için ${jobs.length} kategori`);
+  console.log(`[EmlakRadar] Başladı — ${cities.join(', ')}`);
+  sendProgress(`Başlıyor... ${cities.join(', ')}`);
 
-  const tab = await createTab(jobs[0].url);
+  const tab   = await createTab(jobs[0].url);
   const tabId = tab.id;
   let toplamYeni = 0;
+  let firstNav   = true;
 
   try {
-    for (let i = 0; i < jobs.length; i++) {
-      const job = jobs[i];
+    // Site bazında grupla: önce tüm sahibinden ilanlarını topla → detay → webhook
+    // Sonra hepsiemlak, sonra emlakjet
+    for (const site of SITE_ORDER) {
+      const siteJobs = jobs.filter(j => j.site === site);
+      if (!siteJobs.length) continue;
+
       try {
-        sendProgress(`${job.site} · ${job.kategori} · ${job.city} — liste tarıyor...`);
+        // ── 1. Bu sitenin tüm kategorilerini tara (liste) ───────────────────
+        const allIlanlar = [];
+        for (const job of siteJobs) {
+          try {
+            sendProgress(`${site} · ${job.kategori} · ${job.city} — liste tarıyor...`);
 
-        if (i > 0) await navigateTab(tabId, job.url);
+            if (!firstNav) await navigateTab(tabId, job.url);
+            firstNav = false;
 
-        // Bot bloğu kontrolü
-        if (await checkBotBlock(tabId)) {
-          sendProgress(`⚠️ Bot bloğu — ${job.site} 5 dk beklenecek`, 'error');
-          await sleep(5 * 60 * 1000);
+            if (await checkBotBlock(tabId)) {
+              sendProgress(`⚠️ ${site} bot bloğu — bu site atlanıyor`, 'error');
+              break;
+            }
+
+            const ilanlar = await injectAndCollect(tabId, job);
+            allIlanlar.push(...ilanlar);
+
+            // Kategoriler arası kısa bekleme
+            await sleep(4000 + Math.random() * 4000);
+          } catch (err) {
+            console.warn(`[EmlakRadar] Liste hatası (${site} ${job.kategori}):`, err.message);
+          }
+        }
+
+        if (!allIlanlar.length) continue;
+
+        // ── 2. Sadece yeni olanları filtrele ────────────────────────────────
+        const yeniler = await filterYeni(allIlanlar);
+        if (!yeniler.length) {
+          sendProgress(`${site} — ${allIlanlar.length} ilan (hepsi kayıtlı)`);
           continue;
         }
 
-        // 1. Liste sayfalarını tara
-        const ilanlar = await injectAndCollect(tabId, job);
+        sendProgress(`${site} — ${yeniler.length} yeni ilan, detaylar çekiliyor (max ${SITE_DETAIL_LIMIT})...`);
 
-        // 2. Sadece yeni olanları filtrele
-        const yeniler = await filterYeni(ilanlar);
+        // ── 3. Detay sayfaları (max SITE_DETAIL_LIMIT) ──────────────────────
+        const zenginIlanlar = await scrapeDetails(tabId, yeniler, site, SITE_DETAIL_LIMIT);
 
-        if (yeniler.length > 0) {
-          // 3. Her yeni ilan için detay sayfasına gir
-          sendProgress(`${job.site} · ${job.kategori} · ${job.city} — ${yeniler.length} yeni ilan detayları çekiliyor...`);
-          const zenginIlanlar = await scrapeDetails(tabId, yeniler, job.site);
+        // ── 4. Webhook'a direkt gönder ──────────────────────────────────────
+        await sendWebhook(zenginIlanlar, cfg);
+        await markGoruldu(zenginIlanlar);
+        toplamYeni += zenginIlanlar.length;
 
-          // 4. Webhook'a gönder
-          await sendWebhook(zenginIlanlar, cfg);
-          await markGoruldu(zenginIlanlar);
-          toplamYeni += zenginIlanlar.length;
+        sendProgress(`✓ ${site} — ${zenginIlanlar.length} ilan siteye eklendi`, 'ok');
+        console.log(`[EmlakRadar] ${site}: ${zenginIlanlar.length} ilan eklendi`);
 
-          sendProgress(`✓ ${job.site} · ${job.kategori} · ${job.city} — ${zenginIlanlar.length} ilan eklendi`, 'ok');
-        } else {
-          sendProgress(`${job.site} · ${job.kategori} · ${job.city} — ${ilanlar.length} ilan (hepsi zaten kayıtlı)`);
-        }
-
-        console.log(`[EmlakRadar] ${job.site}|${job.kategori}|${job.city} → ${ilanlar.length} tarındı, ${yeniler.length} yeni`);
       } catch (err) {
-        console.error(`[EmlakRadar] Hata (${job.site} ${job.kategori}):`, err.message);
-        await chrome.storage.local.set({ lastError: `${job.site}: ${err.message}` });
-        sendProgress(`Hata: ${job.site} - ${err.message}`, 'error');
+        console.error(`[EmlakRadar] Site hatası (${site}):`, err.message);
+        await chrome.storage.local.set({ lastError: `${site}: ${err.message}` });
+        sendProgress(`Hata: ${site} - ${err.message}`, 'error');
       }
 
-      // Siteler arası insan gibi bekleme: 8–18 saniye
-      await sleep(8000 + Math.random() * 10000);
+      // Siteler arası bekleme: 15–25 saniye
+      await sleep(15000 + Math.random() * 10000);
     }
   } finally {
     chrome.tabs.remove(tabId).catch(() => {});
@@ -179,7 +200,7 @@ async function runAllScrapers(force = false) {
       lastScrapeTime:  new Date().toISOString(),
       lastScrapeCount: toplamYeni,
     });
-    sendProgress(`Tamamlandı — toplam ${toplamYeni} yeni ilan eklendi`, 'done');
+    sendProgress(`Tamamlandı — toplam ${toplamYeni} yeni ilan`, 'done');
     console.log(`[EmlakRadar] Tamamlandı — ${toplamYeni} yeni ilan`);
   }
 }
@@ -302,14 +323,12 @@ function injectOnce(tabId, job) {
 }
 
 // ─── Detay Sayfası Scraper ────────────────────────────────────────────────────
-const MAX_DETAIL_PER_RUN = 5; // Bot algısını önlemek için tek seferde max 5 detay
-
-async function scrapeDetails(tabId, ilanlar, site) {
+async function scrapeDetails(tabId, ilanlar, site, limit = 10) {
   const detailFn = getDetailFn(site);
   if (!detailFn) return ilanlar;
 
-  const detayliIlanlar  = ilanlar.slice(0, MAX_DETAIL_PER_RUN);
-  const detaysizIlanlar = ilanlar.slice(MAX_DETAIL_PER_RUN);
+  const detayliIlanlar  = ilanlar.slice(0, limit);
+  const detaysizIlanlar = ilanlar.slice(limit);
 
   const zengin = [];
   let idx = 0;
