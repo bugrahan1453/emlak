@@ -553,7 +553,7 @@ async function _runAllScrapersInner(force = false) {
             // Yeni + tarih filtresi
             let yeniler = await filterYeni(ilanlar);
             if (gunAraligi > 0) {
-              yeniler = yeniler.filter(i => ilanGunFarki(i.ilan_tarihi) <= gunAraligi);
+              yeniler = yeniler.filter(i => !i.ilan_tarihi || ilanGunFarki(i.ilan_tarihi) <= gunAraligi);
             }
 
             sendProgress(`${site} · sayfa ${page}: ${ilanlar.length} ilan, ${yeniler.length} yeni`);
