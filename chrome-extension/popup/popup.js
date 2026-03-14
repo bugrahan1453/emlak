@@ -54,15 +54,16 @@ function refreshStatus() {
     }
 
     // Buton durumu
-    const btn = $('scrape-btn');
+    const btn  = $('scrape-btn');
+    const stop = $('stop-btn');
     if (data.isRunning) {
-      btn.textContent = '⏳ Tarıyor...';
-      btn.className   = 'running';
-      btn.disabled    = false; // force=true ile durdurulabilsin
+      btn.textContent  = '⏳ Tarıyor...';
+      btn.className    = 'running';
+      stop.style.display = 'block';
     } else {
-      btn.textContent = '▶ Şimdi Tara';
-      btn.className   = '';
-      btn.disabled    = false;
+      btn.textContent  = '▶ Şimdi Tara';
+      btn.className    = '';
+      stop.style.display = 'none';
     }
   });
 }
@@ -70,9 +71,10 @@ function refreshStatus() {
 // ─── Yüklenince ──────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   // Ayarları yükle
-  chrome.storage.sync.get({ cities: 'canakkale', intervalMinutes: 10 }, cfg => {
+  chrome.storage.sync.get({ cities: 'canakkale', intervalMinutes: 10, gunAraligi: 0 }, cfg => {
     $('cities').value          = cfg.cities;
     $('intervalMinutes').value = cfg.intervalMinutes;
+    $('gunAraligi').value      = cfg.gunAraligi;
   });
 
   refreshStatus();
@@ -87,11 +89,19 @@ $('save-btn').addEventListener('click', () => {
   const cfg = {
     cities:          $('cities').value.trim() || 'canakkale',
     intervalMinutes: parseInt($('intervalMinutes').value) || 10,
+    gunAraligi:      parseInt($('gunAraligi').value) || 0,
     enabled:         true,
   };
   chrome.storage.sync.set(cfg, () => {
     setLog('Ayarlar kaydedildi', 'ok');
     setTimeout(() => setLog('Hazır'), 2000);
+  });
+});
+
+// ─── Durdur ───────────────────────────────────────────────────────────────────
+$('stop-btn').addEventListener('click', () => {
+  chrome.runtime.sendMessage({ type: 'stop_scrape' }, () => {
+    setLog('Durdurma isteği gönderildi...', 'error');
   });
 });
 

@@ -113,7 +113,8 @@
     }
     #scrape-btn { background: #276749; color: #fff; }
     #scrape-btn:hover { background: #38a169; }
-    #scrape-btn.running { background: #1a3050; color: #63b3ed; cursor: not-allowed; }
+    #stop-btn  { background: #742a2a; color: #fff; display:none; }
+    #stop-btn:hover  { background: #9b2c2c; }
     #save-btn { background: #2b4a7a; color: #fff; }
     #save-btn:hover { background: #3182ce; }
     #clear-btn { background: #4a2010; color: #fc8181; font-size: 11px; }
@@ -178,10 +179,15 @@
       <label class="fl">Aralık (dk)</label>
       <input type="number" id="intervalMinutes" min="5" max="120" style="max-width:70px;">
     </div>
+    <div class="form-row">
+      <label class="fl">Gün aralığı <span style="color:#4a5568">(0=tümü)</span></label>
+      <input type="number" id="gunAraligi" min="0" max="365" style="max-width:70px;" title="0=filtre yok (başlangıç), 1=bugün/dün, 7=son hafta">
+    </div>
   </div>
 
   <div class="buttons">
     <button id="scrape-btn">▶ Şimdi Tara</button>
+    <button id="stop-btn">⏹ Durdur</button>
     <button id="save-btn">💾 Kaydet</button>
     <button id="clear-btn" style="grid-column:1/-1">🗑 Önbelleği Temizle (tüm ilanları yeniden tara)</button>
   </div>

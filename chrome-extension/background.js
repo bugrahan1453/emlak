@@ -23,13 +23,14 @@ async function signPayload(payload, secret) {
     .map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-// ─── Kullanıcı Ayarları (sadece şehir + interval) ─────────────────────────────
+// ─── Kullanıcı Ayarları ───────────────────────────────────────────────────────
 function getConfig() {
   return new Promise(resolve => {
     chrome.storage.sync.get({
       cities:          DEFAULT_CITIES,
       intervalMinutes: 10,
       enabled:         true,
+      gunAraligi:      1,   // Kaç günlük ilanlar çekilsin (1=sadece bugün/dün)
     }, resolve);
   });
 }
@@ -75,6 +76,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       .catch(err => sendResponse({ ok: false, error: err.message }));
     return true;
   }
+  if (msg.type === 'stop_scrape') {
+    shouldStop = true;
+    sendProgress('Durdurma isteği alındı...', 'error');
+    sendResponse({ ok: true });
+    return true;
+  }
   if (msg.type === 'get_status') {
     chrome.storage.local.get(['lastScrapeTime', 'lastScrapeCount', 'lastError', 'progress', 'isRunning', 'seenIds'], data => {
       sendResponse({ ...data, seenCount: (data.seenIds || []).length });
@@ -105,14 +112,16 @@ async function checkBotBlock(tabId) {
 }
 
 // ─── Ana Koordinatör ──────────────────────────────────────────────────────────
-let isRunning = false;
+let isRunning  = false;
+let shouldStop = false;
 
-const SITE_DETAIL_LIMIT = 10; // Site başına max detay sayısı
+const SITE_DETAIL_LIMIT = 10;
 const SITE_ORDER = ['sahibinden', 'hepsiemlak', 'emlakjet'];
 
 async function runAllScrapers(force = false) {
   if (isRunning && !force) { console.log('[EmlakRadar] Zaten çalışıyor, atlandı'); return; }
   if (isRunning && force)  { console.log('[EmlakRadar] Force başlatıldı, önceki tur sıfırlandı'); isRunning = false; }
+  shouldStop = false; // Her yeni turda sıfırla
   const cfg = await getConfig();
   if (!force && !cfg.enabled) { console.log('[EmlakRadar] Devre dışı'); return; }
 
@@ -164,25 +173,39 @@ async function runAllScrapers(force = false) {
 
         if (!allIlanlar.length) continue;
 
-        // ── 2. Sadece yeni olanları filtrele ────────────────────────────────
-        const yeniler = await filterYeni(allIlanlar);
-        if (!yeniler.length) {
-          sendProgress(`${site} — ${allIlanlar.length} ilan (hepsi kayıtlı)`);
+        // ── 2. Tarih + seenIds filtresi ──────────────────────────────────────
+        // Önce seenIds: daha önce hiç işlenmemiş ilanları bul
+        const gunAraligi  = cfg.gunAraligi ?? 0; // 0 = filtre yok (tüm yeni ilanlar)
+        const seenFiltreli = await filterYeni(allIlanlar);
+
+        // Tarih filtresi: gunAraligi > 0 ise sadece son N günün ilanları detaylanır
+        // gunAraligi = 0 ise tüm yeni ilanlar detaylanır (başlangıç modu)
+        const detaylanacak = gunAraligi > 0
+          ? seenFiltreli.filter(i => ilanGunFarki(i.ilan_tarihi) <= gunAraligi)
+          : seenFiltreli;
+
+        // Liste verisiyle tüm yeni ilanları hemen kaydet (detay olmasa da)
+        const detaySizKalanlar = seenFiltreli.filter(i => !detaylanacak.includes(i));
+        if (detaySizKalanlar.length) {
+          await sendWebhook(detaySizKalanlar, cfg);
+          await markGoruldu(detaySizKalanlar);
+          sendProgress(`${site} — ${detaySizKalanlar.length} eski ilan liste verisiyle kaydedildi`);
+        }
+
+        if (!detaylanacak.length) {
+          const filtreTxt = gunAraligi > 0 ? `son ${gunAraligi} gün` : 'tüm yeni';
+          sendProgress(`${site} — ${filtreTxt} için detaylanacak ilan yok`);
           continue;
         }
 
-        sendProgress(`${site} — ${yeniler.length} yeni ilan, detaylar çekiliyor (max ${SITE_DETAIL_LIMIT})...`);
+        sendProgress(`${site} — ${detaylanacak.length} ilan detaylanıyor (max ${SITE_DETAIL_LIMIT})...`);
 
-        // ── 3. Detay sayfaları (max SITE_DETAIL_LIMIT) ──────────────────────
-        const zenginIlanlar = await scrapeDetails(tabId, yeniler, site, SITE_DETAIL_LIMIT);
+        // ── 3. Detay sayfaları — her biri anında siteye gönderilir ───────────
+        const eklenen = await scrapeDetails(tabId, detaylanacak, site, SITE_DETAIL_LIMIT, cfg);
+        toplamYeni += eklenen;
 
-        // ── 4. Webhook'a direkt gönder ──────────────────────────────────────
-        await sendWebhook(zenginIlanlar, cfg);
-        await markGoruldu(zenginIlanlar);
-        toplamYeni += zenginIlanlar.length;
-
-        sendProgress(`✓ ${site} — ${zenginIlanlar.length} ilan siteye eklendi`, 'ok');
-        console.log(`[EmlakRadar] ${site}: ${zenginIlanlar.length} ilan eklendi`);
+        sendProgress(`✓ ${site} — ${eklenen} ilan tam veriyle siteye eklendi`, 'ok');
+        console.log(`[EmlakRadar] ${site}: ${eklenen} ilan eklendi`);
 
       } catch (err) {
         console.error(`[EmlakRadar] Site hatası (${site}):`, err.message);
@@ -323,34 +346,58 @@ function injectOnce(tabId, job) {
   });
 }
 
-// ─── Detay Sayfası Scraper ────────────────────────────────────────────────────
-async function scrapeDetails(tabId, ilanlar, site, limit = 10) {
+// ─── Türkçe tarih → gün farkı (Sahibinden formatı) ───────────────────────────
+function ilanGunFarki(tarihStr) {
+  if (!tarihStr) return 999;
+  const s = tarihStr.trim().toLowerCase();
+  if (s.includes('bugün') || s.includes('saat önce') || s.includes('dakika önce')) return 0;
+  if (s.includes('dün')) return 1;
+  const aylar = { ocak:0,şubat:1,mart:2,nisan:3,mayıs:4,haziran:5,temmuz:6,ağustos:7,eylül:8,ekim:9,kasım:10,aralık:11 };
+  const m = s.match(/(\d{1,2})\s+(\w+)\s+(\d{4})/);
+  if (m) {
+    const ay = aylar[m[2]];
+    if (ay !== undefined) {
+      const d = new Date(parseInt(m[3]), ay, parseInt(m[1]));
+      const fark = (Date.now() - d.getTime()) / 86400000;
+      return Math.floor(fark);
+    }
+  }
+  return 999;
+}
+
+// ─── Detay Sayfası Scraper — her detay anında webhook'a gönderilir ───────────
+async function scrapeDetails(tabId, ilanlar, site, limit = 10, cfg = {}) {
   const detailFn = getDetailFn(site);
   if (!detailFn) return ilanlar;
 
   const detayliIlanlar  = ilanlar.slice(0, limit);
   const detaysizIlanlar = ilanlar.slice(limit);
 
-  const zengin = [];
+  let eklenen = 0;
   let idx = 0;
   for (const ilan of detayliIlanlar) {
+    // Durdur isteği kontrol
+    if (shouldStop) {
+      sendProgress('⏹ Durduruldu', 'error');
+      break;
+    }
+
     idx++;
-    sendProgress(`${site} detay ${idx}/${detayliIlanlar.length}: ${ilan.baslik?.slice(0, 40)}...`);
-    if (!ilan.kaynak_url) { zengin.push(ilan); continue; }
+    sendProgress(`${site} detay ${idx}/${detayliIlanlar.length}: ${ilan.baslik?.slice(0, 35)}...`);
+    if (!ilan.kaynak_url) { await sendWebhook([ilan], cfg); await markGoruldu([ilan]); eklenen++; continue; }
     try {
       await navigateTab(tabId, ilan.kaynak_url);
 
       if (await checkBotBlock(tabId)) {
-        // Bot algısı: bu turu durdur, kalanları detaysız ekle, sıradaki taramada yakalanır
-        sendProgress('⚠️ Bot bloğu — bu tur durduruldu, 10 dk sonra tekrar denenecek', 'error');
-        zengin.push(ilan);
-        zengin.push(...detayliIlanlar.slice(idx));
-        zengin.push(...detaysizIlanlar);
-        return zengin;
+        sendProgress('⚠️ Bot bloğu — bu site bu tur durduruldu', 'error');
+        // Kalan detaysızları yine de kaydet
+        await sendWebhook(detayliIlanlar.slice(idx - 1), cfg);
+        await markGoruldu(detayliIlanlar.slice(idx - 1));
+        break;
       }
 
       const detail = await injectDetail(tabId, detailFn);
-      zengin.push({
+      const zenginIlan = {
         ...ilan,
         aciklama:    detail.aciklama   || ilan.aciklama || '',
         fotograflar: detail.fotograflar?.length ? detail.fotograflar : ilan.fotograflar,
@@ -363,19 +410,29 @@ async function scrapeDetails(tabId, ilanlar, site, limit = 10) {
         satici_ad:   detail.satici_ad   || ilan.satici_ad,
         satici_tel:  detail.satici_tel  || ilan.satici_tel,
         konum:       detail.konum       || ilan.konum,
-      });
+      };
+
+      // ── Her detay biter bitmez anında siteye gönder ──────────────────────
+      await sendWebhook([zenginIlan], cfg);
+      await markGoruldu([zenginIlan]);
+      eklenen++;
+      sendProgress(`✓ ${site} ${idx}/${detayliIlanlar.length}: "${ilan.baslik?.slice(0,30)}" → siteye eklendi`, 'ok');
+
     } catch (err) {
       console.warn('[EmlakRadar] Detay hatası:', ilan.kaynak_url, err.message);
-      zengin.push(ilan);
+      await sendWebhook([ilan], cfg); // Detayz da kaydet
+      await markGoruldu([ilan]);
+      eklenen++;
     }
 
-    // Detay sayfaları arası: 25–50 saniye (bot algısını önlemek için)
-    if (idx < detayliIlanlar.length) {
+    if (idx < detayliIlanlar.length && !shouldStop) {
       await sleep(25000 + Math.random() * 25000);
     }
   }
 
-  zengin.push(...detaysizIlanlar);
+  // Detay çekilemeyen kalan ilanlar — sıradaki turda alınır (webhook'a gönderme)
+  await markGoruldu(detaysizIlanlar);
+  return eklenen;
   return zengin;
 }
 
