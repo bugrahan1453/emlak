@@ -20,7 +20,10 @@
     "https://*.sahibinden.com/*",
     "https://www.hepsiemlak.com/*",
     "https://www.emlakjet.com/*",
-    "https://hetagayrimenkul.com/*"
+    "https://hetagayrimenkul.com/*",
+    "https://api.capmonster.cloud/*",
+    "https://api.capsolver.com/*",
+    "https://api.2captcha.com/*"
   ],
 
   "background": {
