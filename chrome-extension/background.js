@@ -76,8 +76,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
   if (msg.type === 'get_status') {
-    chrome.storage.local.get(['lastScrapeTime', 'lastScrapeCount', 'lastError', 'progress', 'isRunning'], data => {
-      sendResponse(data);
+    chrome.storage.local.get(['lastScrapeTime', 'lastScrapeCount', 'lastError', 'progress', 'isRunning', 'seenIds'], data => {
+      sendResponse({ ...data, seenCount: (data.seenIds || []).length });
     });
     return true;
   }
@@ -111,7 +111,8 @@ const SITE_DETAIL_LIMIT = 10; // Site başına max detay sayısı
 const SITE_ORDER = ['sahibinden', 'hepsiemlak', 'emlakjet'];
 
 async function runAllScrapers(force = false) {
-  if (isRunning) { console.log('[EmlakRadar] Zaten çalışıyor, atlandı'); return; }
+  if (isRunning && !force) { console.log('[EmlakRadar] Zaten çalışıyor, atlandı'); return; }
+  if (isRunning && force)  { console.log('[EmlakRadar] Force başlatıldı, önceki tur sıfırlandı'); isRunning = false; }
   const cfg = await getConfig();
   if (!force && !cfg.enabled) { console.log('[EmlakRadar] Devre dışı'); return; }
 

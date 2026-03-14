@@ -33,6 +33,8 @@ function refreshStatus() {
 
     $('last-time').textContent  = formatTime(data.lastScrapeTime);
     $('last-count').textContent = data.lastScrapeCount != null ? String(data.lastScrapeCount) : '—';
+    $('seen-count').textContent = data.seenCount != null ? String(data.seenCount) + ' ilan' : '—';
+    $('err-short').textContent  = data.lastError ? data.lastError.slice(0, 40) : '—';
 
     setStatus(data.isRunning, data.lastError);
 
@@ -56,7 +58,7 @@ function refreshStatus() {
     if (data.isRunning) {
       btn.textContent = '⏳ Tarıyor...';
       btn.className   = 'running';
-      btn.disabled    = true;
+      btn.disabled    = false; // force=true ile durdurulabilsin
     } else {
       btn.textContent = '▶ Şimdi Tara';
       btn.className   = '';

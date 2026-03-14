@@ -43,7 +43,7 @@
 
     .stats {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: 1fr 1fr 1fr 1fr;
       gap: 1px;
       background: #2d3748;
       border-bottom: 1px solid #2d3748;
@@ -150,6 +150,14 @@
     <div class="stat">
       <div class="label">Yeni İlan</div>
       <div class="value green" id="last-count">—</div>
+    </div>
+    <div class="stat">
+      <div class="label">Önbellekte</div>
+      <div class="value" id="seen-count">—</div>
+    </div>
+    <div class="stat">
+      <div class="label">Son Hata</div>
+      <div class="value" id="err-short" style="font-size:10px;color:#fc8181;word-break:break-all">—</div>
     </div>
   </div>
 
