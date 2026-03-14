@@ -10,6 +10,12 @@ const WEBHOOK_SECRET = 'HetagScraper2024!xK9mPqR7wZn';
 const DEFAULT_CITIES = 'canakkale';
 const MAX_PAGES      = 5;
 
+const CAPTCHA_APIS = {
+  capmonster: { create: 'https://api.capmonster.cloud/createTask', result: 'https://api.capmonster.cloud/getTaskResult' },
+  capsolver:  { create: 'https://api.capsolver.com/createTask',    result: 'https://api.capsolver.com/getTaskResult'    },
+  '2captcha': { create: 'https://api.2captcha.com/createTask',     result: 'https://api.2captcha.com/getTaskResult'     },
+};
+
 // ─── HMAC-SHA256 ──────────────────────────────────────────────────────────────
 async function signPayload(payload, secret) {
   const enc = new TextEncoder();
@@ -30,7 +36,9 @@ function getConfig() {
       cities:          DEFAULT_CITIES,
       intervalMinutes: 10,
       enabled:         true,
-      gunAraligi:      1,   // Kaç günlük ilanlar çekilsin (1=sadece bugün/dün)
+      gunAraligi:      1,
+      captchaSolver:   '',   // 'capmonster' | 'capsolver' | '2captcha' | ''
+      captchaApiKey:   '',
     }, resolve);
   });
 }
@@ -39,6 +47,35 @@ function getConfig() {
 function sendProgress(msg, type = 'info') {
   chrome.storage.local.set({ progress: { msg, type, ts: Date.now() } });
 }
+
+// ─── Yardımcı fonksiyonlar ─────────────────────────────────────────────────────
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// Gaussian dağılım — insan davranışına daha yakın (uniform yerine)
+function gaussianDelay(min, max) {
+  let u = 0, v = 0;
+  while (u === 0) u = Math.random();
+  while (v === 0) v = Math.random();
+  let n = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+  n = Math.max(0, Math.min(1, n / 6 + 0.5));
+  return Math.floor(min + n * (max - min));
+}
+
+// Service worker uyanık tut — 25sn'de bir ping (Chrome resmi yöntemi)
+function waitUntil(promise) {
+  const keepAlive = setInterval(() => chrome.runtime.getPlatformInfo(() => {}), 25000);
+  return promise.finally(() => clearInterval(keepAlive));
+}
+
+// ─── Alarm Yeniden Oluşturma (Tarayıcı Restart Sonrası) ───────────────────────
+async function ensureAlarms() {
+  const scrape = await chrome.alarms.get('scrape');
+  if (!scrape) {
+    const delay = 10 + Math.floor(Math.random() * 15);
+    chrome.alarms.create('scrape', { delayInMinutes: delay });
+  }
+}
+ensureAlarms();
 
 // ─── Alarm Kurulumu ───────────────────────────────────────────────────────────
 chrome.runtime.onInstalled.addListener(async (details) => {
@@ -61,6 +98,41 @@ chrome.storage.onChanged.addListener(async (changes) => {
     const minutes = changes.intervalMinutes.newValue || 10;
     await chrome.alarms.clearAll();
     chrome.alarms.create('scrape', { delayInMinutes: 1, periodInMinutes: minutes });
+    ensureAlarms();
+  }
+});
+
+// ─── Sahibinden cf_clearance Cookie İzleme ─────────────────────────────────────
+chrome.cookies.onChanged.addListener((changeInfo) => {
+  const { cookie, removed } = changeInfo;
+  if (!cookie.domain.includes('sahibinden.com')) return;
+
+  if (cookie.name === 'cf_clearance') {
+    if (removed) {
+      chrome.storage.local.set({
+        sessionActive_sahibinden: false,
+        lastError: 'Sahibinden oturumu sona erdi — tarayıcıda siteye giriş yapın',
+      });
+      chrome.notifications.create('session_sahibinden', {
+        type: 'basic', iconUrl: 'icons/icon48.png',
+        title: 'EmlakRadar — Sahibinden Oturumu Bitti',
+        message: 'cf_clearance sona erdi. Taramaya devam için sahibinden.com\'u ziyaret edin.',
+        priority: 2,
+      });
+      sendProgress('⚠️ Sahibinden cf_clearance sona erdi — siteyi ziyaret edin', 'error');
+    } else {
+      const expiry = cookie.expirationDate ? cookie.expirationDate * 1000 : null;
+      chrome.storage.local.set({
+        sessionActive_sahibinden: true,
+        sessionExpiry_sahibinden: expiry,
+        lastError: '',
+      });
+      sendProgress('✓ Sahibinden oturumu aktif (cf_clearance alındı)', 'ok');
+    }
+  }
+
+  if (!removed && (cookie.name === 'vid' || cookie.name === 'st' || cookie.name === 'MS1')) {
+    chrome.storage.local.set({ loginActive_sahibinden: true });
   }
 });
 
@@ -83,8 +155,16 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
   if (msg.type === 'get_status') {
-    chrome.storage.local.get(['lastScrapeTime', 'lastScrapeCount', 'lastError', 'progress', 'isRunning', 'seenIds'], data => {
-      sendResponse({ ...data, seenCount: (data.seenIds || []).length });
+    chrome.storage.local.get([
+      'lastScrapeTime', 'lastScrapeCount', 'lastError', 'progress', 'isRunning', 'seenIds',
+      'sessionActive_sahibinden', 'sessionExpiry_sahibinden', 'captchaCount', 'errorLog',
+    ], data => {
+      sendResponse({
+        ...data,
+        seenCount: (data.seenIds || []).length,
+        errorLogCount: (data.errorLog || []).length,
+        captchaCount: data.captchaCount || 0,
+      });
     });
     return true;
   }
@@ -92,23 +172,305 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     chrome.storage.sync.set(msg.cfg).then(() => sendResponse({ ok: true }));
     return true;
   }
+  if (msg.type === 'get_error_log') {
+    chrome.storage.local.get(['errorLog'], data => sendResponse({ log: data.errorLog || [] }));
+    return true;
+  }
+  if (msg.type === 'test_captcha_key') {
+    const { solver, key } = msg;
+    const api = CAPTCHA_APIS[solver];
+    if (!api) { sendResponse({ ok: false, error: 'Bilinmeyen servis' }); return true; }
+    fetch(api.create, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clientKey: key, task: { type: 'TurnstileTaskProxyless', websiteURL: 'https://example.com', websiteKey: 'test' } }),
+    }).then(r => r.json()).then(d => {
+      sendResponse({ ok: d.errorId === 0 || d.taskId != null, balance: d.balance });
+    }).catch(e => sendResponse({ ok: false, error: e.message }));
+    return true;
+  }
+  if (msg.type === 'refresh_session') {
+    chrome.tabs.create({ url: 'https://www.sahibinden.com', active: true });
+    sendResponse({ ok: true });
+    return true;
+  }
 });
 
-// ─── Bot Bloğu Kontrolü ───────────────────────────────────────────────────────
+// ─── Sahibinden Oturum Kontrolü ───────────────────────────────────────────────
+async function checkSessionBeforeScrape() {
+  const cfCookie = await chrome.cookies.get({ url: 'https://www.sahibinden.com', name: 'cf_clearance' }).catch(() => null);
+  if (!cfCookie) {
+    sendProgress('⚠️ Sahibinden cf_clearance yok — siteye önce giriş yapın', 'error');
+    await chrome.storage.local.set({ sessionActive_sahibinden: false });
+    return false;
+  }
+  if (cfCookie.expirationDate && (cfCookie.expirationDate * 1000 - Date.now()) < 5 * 60 * 1000) {
+    sendProgress('⚠️ Sahibinden oturumu bitmek üzere — siteyi tekrar ziyaret edin', 'error');
+    return false;
+  }
+  return true;
+}
+
+// ─── Bot Bloğu Kontrol (basit — recursive olmayan) ────────────────────────────
+async function checkBotBlockSimple(tabId) {
+  try {
+    const r = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const txt = (document.body?.innerText || '').toLowerCase();
+        const url = location.href;
+        return txt.includes('olağan dışı') || url.includes('olagan-disi') ||
+               txt.includes('tarayıcınızı kontrol') || txt.includes('checking your browser') ||
+               txt.includes('just a moment') || txt.includes('access denied') ||
+               document.title.toLowerCase().includes('erişim engellendi');
+      },
+    });
+    return r?.[0]?.result === true;
+  } catch (_) { return false; }
+}
+
+// ─── Bot Bloğu Kontrol (tam — CAPTCHA çözme dener) ────────────────────────────
 async function checkBotBlock(tabId) {
   try {
     const results = await chrome.scripting.executeScript({
       target: { tabId },
       func: () => {
-        const txt = document.body?.innerText || '';
-        return txt.includes('Olağan dışı erişim') ||
-               txt.includes('olağan dışı') ||
-               txt.includes('robot') ||
-               document.title.toLowerCase().includes('erişim engellendi');
+        const txt   = (document.body?.innerText || '').toLowerCase();
+        const title = (document.title || '').toLowerCase();
+        const url   = location.href.toLowerCase();
+        return {
+          blocked:   txt.includes('olağan dışı erişim') || txt.includes('olağan dışı') ||
+                     url.includes('olagan-disi') || title.includes('erişim engellendi') ||
+                     title.includes('access denied'),
+          challenge: txt.includes('tarayıcınızı kontrol ediyoruz') ||
+                     txt.includes('checking your browser') || txt.includes('just a moment') ||
+                     txt.includes('devam et butonuna') || txt.includes('verify you are human') ||
+                     document.querySelector('iframe[src*="challenges.cloudflare.com"]') !== null ||
+                     document.querySelector('[class*="cf-turnstile"]') !== null,
+          login:     url.includes('/login') || url.includes('/giris') || url.includes('signin') ||
+                     (txt.includes('giriş yap') && txt.includes('şifre') &&
+                      document.querySelector('input[type="password"]') !== null),
+        };
       },
     });
-    return results?.[0]?.result === true;
+    const st = results?.[0]?.result;
+    if (!st) return false;
+
+    if (st.login) {
+      sendProgress('⚠️ Giriş sayfası — tarayıcıda sahibinden.com\'a giriş yapın', 'error');
+      await chrome.storage.local.set({ lastError: 'Sahibinden giriş gerekli — tarayıcıda oturum açın' });
+      return true;
+    }
+
+    if (st.challenge) {
+      sendProgress('Challenge sayfası — çözüm deneniyor...', 'info');
+      const cfg = await getConfig();
+      if (cfg.captchaSolver && cfg.captchaApiKey) {
+        const solved = await trySolveCaptcha(tabId, cfg);
+        if (solved) { sendProgress('✓ CAPTCHA çözüldü, devam ediliyor', 'ok'); return false; }
+      }
+      const debugSolved = await trySolveChallenge(tabId);
+      if (debugSolved) { sendProgress('✓ Challenge geçildi', 'ok'); return false; }
+
+      sendProgress('⚠️ Challenge geçilemedi — ban olarak işleniyor', 'error');
+      chrome.notifications.create('challenge_failed_' + Date.now(), {
+        type: 'basic', iconUrl: 'icons/icon48.png',
+        title: 'EmlakRadar — Challenge Geçilemedi',
+        message: 'Sahibinden challenge sayfasını geçemedik. Tarayıcıda siteyi ziyaret edin.',
+        priority: 2,
+      });
+      return true;
+    }
+
+    return st.blocked === true;
   } catch (_) { return false; }
+}
+
+// ─── CAPTCHA Tespiti ──────────────────────────────────────────────────────────
+async function detectCaptcha(tabId) {
+  try {
+    const r = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const out = { hasCaptcha: false, type: null, sitekey: null, pageUrl: location.href };
+        const turnstile = document.querySelector(
+          'iframe[src*="challenges.cloudflare.com"], [class*="cf-turnstile"], #cf-turnstile-response, [data-turnstile-sitekey]'
+        );
+        if (turnstile) {
+          out.hasCaptcha = true; out.type = 'turnstile';
+          const w = document.querySelector('[data-sitekey], [data-turnstile-sitekey]');
+          if (w) out.sitekey = w.getAttribute('data-sitekey') || w.getAttribute('data-turnstile-sitekey');
+          if (!out.sitekey) {
+            const m = document.documentElement.innerHTML.match(/sitekey['":\s]+['"]([0-9a-zA-Z_\-\.]{10,})['"]/);
+            if (m) out.sitekey = m[1];
+          }
+          return out;
+        }
+        const txt = (document.body?.innerText || '').toLowerCase();
+        if (txt.includes('tarayıcınızı kontrol') || txt.includes('checking your browser') || txt.includes('just a moment')) {
+          out.hasCaptcha = true; out.type = 'cf_challenge'; return out;
+        }
+        const re = document.querySelector('iframe[src*="google.com/recaptcha"], .g-recaptcha, #g-recaptcha-response');
+        if (re) {
+          out.hasCaptcha = true; out.type = 'recaptcha_v2';
+          const w2 = document.querySelector('.g-recaptcha[data-sitekey]');
+          if (w2) out.sitekey = w2.getAttribute('data-sitekey');
+          return out;
+        }
+        return out;
+      },
+    });
+    return r?.[0]?.result || { hasCaptcha: false };
+  } catch (_) { return { hasCaptcha: false }; }
+}
+
+// ─── CAPTCHA Çözme API ────────────────────────────────────────────────────────
+async function solveCaptchaViaAPI(captchaInfo, cfg) {
+  const { type, sitekey, pageUrl } = captchaInfo;
+  const api = CAPTCHA_APIS[cfg.captchaSolver];
+  if (!api) return null;
+
+  let taskData;
+  if (type === 'turnstile')    taskData = { type: 'TurnstileTaskProxyless',   websiteURL: pageUrl, websiteKey: sitekey };
+  else if (type === 'recaptcha_v2') taskData = { type: 'RecaptchaV2TaskProxyless', websiteURL: pageUrl, websiteKey: sitekey };
+  else if (type === 'cf_challenge') taskData = { type: 'AntiCloudflareTask', websiteURL: pageUrl, metadata: { type: 'challenge' } };
+  else return null;
+
+  try {
+    const createRes = await fetch(api.create, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clientKey: cfg.captchaApiKey, task: taskData }),
+    });
+    const created = await createRes.json();
+    if (created.errorId) { console.warn('[EmlakRadar] CAPTCHA task hatası:', created.errorDescription); return null; }
+    const taskId = created.taskId;
+    if (!taskId) return null;
+
+    for (let i = 0; i < 24; i++) {
+      await sleep(5000);
+      sendProgress(`CAPTCHA çözülüyor... (${(i + 1) * 5}sn)`, 'info');
+      const res = await fetch(api.result, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientKey: cfg.captchaApiKey, taskId }),
+      });
+      const data = await res.json();
+      if (data.status === 'ready') return data.solution;
+      if (data.errorId) { console.warn('[EmlakRadar] CAPTCHA çözüm hatası:', data.errorDescription); return null; }
+    }
+    return null;
+  } catch (e) { console.error('[EmlakRadar] CAPTCHA API hatası:', e.message); return null; }
+}
+
+// ─── CAPTCHA Token Enjeksiyonu ────────────────────────────────────────────────
+async function injectCaptchaSolution(tabId, type, solution) {
+  return chrome.scripting.executeScript({
+    target: { tabId }, world: 'MAIN',
+    func: (t, sol) => {
+      if (t === 'turnstile') {
+        const f = document.querySelector('[name="cf-turnstile-response"], #cf-turnstile-response, input[name*="turnstile"]');
+        if (f) f.value = sol.token;
+        const w = document.querySelector('[data-callback]');
+        if (w) { const cb = w.getAttribute('data-callback'); if (window[cb]) { window[cb](sol.token); return; } }
+        const form = f?.closest('form');
+        if (form) form.submit();
+      } else if (t === 'recaptcha_v2') {
+        const f = document.querySelector('#g-recaptcha-response');
+        if (f) { f.value = sol.gRecaptchaResponse; f.style.display = 'block'; }
+      } else if (t === 'cf_challenge') {
+        location.reload();
+      }
+    },
+    args: [type, solution],
+  }).catch(() => {});
+}
+
+// ─── Tam CAPTCHA Çözme Akışı ──────────────────────────────────────────────────
+async function trySolveCaptcha(tabId, cfg) {
+  const info = await detectCaptcha(tabId);
+  if (!info.hasCaptcha) return false;
+  const sol = await solveCaptchaViaAPI(info, cfg);
+  if (!sol) return false;
+  await injectCaptchaSolution(tabId, info.type, sol);
+  await sleep(5000 + Math.random() * 3000);
+  const captchaCount = ((await chrome.storage.local.get(['captchaCount'])).captchaCount || 0) + 1;
+  await chrome.storage.local.set({ captchaCount });
+  return !await checkBotBlockSimple(tabId);
+}
+
+// ─── Challenge Sayfası Geçme (API yoksa — dispatchEvent yöntemi) ───────────────
+async function trySolveChallenge(tabId) {
+  try {
+    await sleep(3000 + Math.random() * 2000);
+    const r = await chrome.scripting.executeScript({
+      target: { tabId }, world: 'MAIN',
+      func: async () => {
+        for (let i = 0; i < 15; i++) {
+          window.dispatchEvent(new MouseEvent('mousemove', {
+            clientX: 100 + Math.random() * 800 + i * 20,
+            clientY: 150 + Math.random() * 400 + i * 8,
+            movementX: Math.random() * 10 - 5, movementY: Math.random() * 8 - 4,
+            bubbles: true,
+          }));
+          await new Promise(rr => setTimeout(rr, 100 + Math.random() * 300));
+        }
+        const btns = [...document.querySelectorAll('button, input[type="button"], input[type="submit"], [role="button"]')];
+        const btn = btns.find(b => /devam|continue|verify|doğrula|ileri/i.test(b.textContent + b.value + (b.getAttribute('aria-label') || '')));
+        if (!btn) return false;
+        btn.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+        await new Promise(rr => setTimeout(rr, 300 + Math.random() * 400));
+        btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+        await new Promise(rr => setTimeout(rr, 80 + Math.random() * 120));
+        btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }));
+        btn.click();
+        return true;
+      },
+    }).catch(() => [{ result: false }]);
+    if (!r?.[0]?.result) return false;
+    await sleep(5000 + Math.random() * 3000);
+    return !await checkBotBlockSimple(tabId);
+  } catch (_) { return false; }
+}
+
+// ─── Bildirimler ──────────────────────────────────────────────────────────────
+async function notifyNewListings(site, count, city) {
+  if (count <= 0) return;
+  chrome.notifications.create('new_' + Date.now(), {
+    type: 'basic', iconUrl: 'icons/icon48.png',
+    title: `${count} Yeni İlan Bulundu!`,
+    message: `${city} — ${site} üzerinde ${count} yeni ilan eklendi.`,
+    priority: 1,
+  });
+}
+
+// ─── Hata Kaydı ───────────────────────────────────────────────────────────────
+async function logError(site, tip, mesaj) {
+  const { errorLog = [] } = await chrome.storage.local.get(['errorLog']);
+  errorLog.unshift({ zaman: new Date().toISOString(), site, tip, mesaj });
+  if (errorLog.length > 50) errorLog.length = 50;
+  await chrome.storage.local.set({ errorLog });
+}
+
+// ─── Veri Kalite Kontrolü ─────────────────────────────────────────────────────
+function validateListing(ilan) {
+  if (!ilan.kaynak_id || !ilan.kaynak_url?.startsWith('http')) return null;
+  if (!ilan.baslik || ilan.baslik.trim().length < 3) return null;
+  if (isNaN(ilan.fiyat) || ilan.fiyat < 0) ilan.fiyat = null;
+  return ilan;
+}
+
+// ─── Selector Sağlık Kontrolü ─────────────────────────────────────────────────
+async function checkSelectorHealth(site, count) {
+  const key = `selectorFail_${site}`;
+  const { [key]: fails = 0 } = await chrome.storage.local.get([key]);
+  if (count === 0) {
+    const n = fails + 1;
+    await chrome.storage.local.set({ [key]: n });
+    if (n >= 3) {
+      sendProgress(`⚠️ ${site} — ${n} ardışık boş tarama! Selector kırılmış olabilir.`, 'error');
+      await logError(site, 'selector_fail', `${n} ardışık boş tarama`);
+    }
+  } else if (fails > 0) {
+    await chrome.storage.local.set({ [key]: 0 });
+  }
 }
 
 // ─── Ana Koordinatör ──────────────────────────────────────────────────────────
@@ -121,6 +483,10 @@ async function runAllScrapers(force = false) {
   if (isRunning && !force) { console.log('[EmlakRadar] Zaten çalışıyor, atlandı'); return; }
   if (isRunning && force)  { console.log('[EmlakRadar] Force, önceki tur sıfırlandı'); isRunning = false; }
   shouldStop = false;
+  return waitUntil(_runAllScrapersInner(force));
+}
+
+async function _runAllScrapersInner(force = false) {
   const cfg = await getConfig();
   if (!force && !cfg.enabled) return;
 
@@ -136,6 +502,7 @@ async function runAllScrapers(force = false) {
 
   const tab   = await createTab(jobs[0].url);
   const tabId = tab.id;
+  await setRandomViewport(tabId);
   let toplamYeni = 0;
 
   try {
@@ -145,7 +512,13 @@ async function runAllScrapers(force = false) {
       if (!siteJobs.length) continue;
       const detailFn = getDetailFn(site);
 
-      try {
+      // Sahibinden için oturum kontrolü
+    if (site === 'sahibinden') {
+      const ok = await checkSessionBeforeScrape();
+      if (!ok) { sendProgress(`⚠️ Sahibinden atlandı — oturum yok`, 'error'); continue; }
+    }
+
+    try {
         for (const job of siteJobs) {
           if (shouldStop) break;
           let nextUrl = job.url;
@@ -165,8 +538,11 @@ async function runAllScrapers(force = false) {
 
             // Liste sayfasındaki ilanlar
             const pageResult = await injectOnce(tabId, job);
-            const ilanlar    = pageResult.ilanlar || [];
+            const rawIlanlar = (pageResult.ilanlar || []).map(validateListing).filter(Boolean);
+            const ilanlar    = rawIlanlar;
             nextUrl          = pageResult.nextUrl || null;
+
+            await checkSelectorHealth(site, ilanlar.length);
 
             // Yeni + tarih filtresi
             let yeniler = await filterYeni(ilanlar);
@@ -227,8 +603,9 @@ async function runAllScrapers(force = false) {
                 }
                 if (durum === 'bot_ban') {
                   sendProgress(`⚠️ ${site} bot bloğu — 15dk bekleniyor...`, 'error');
+                  await logError(site, 'bot_block', `Detay sayfasında bot bloğu: ${ilan.kaynak_url}`);
                   botBan = true;
-                  await sleep(15 * 60 * 1000); // 15 dakika bekle
+                  await sleep(15 * 60 * 1000);
                   botBan = false;
                   sendProgress(`${site}: bekleme bitti, devam ediliyor`);
                   // Bu ilanı tekrar dene
@@ -257,6 +634,7 @@ async function runAllScrapers(force = false) {
                 if (wh.eklenen > 0) {
                   toplamYeni++;
                   sendProgress(`✓ ${site} · "${ilan.baslik?.slice(0, 30)}" → siteye eklendi`, 'ok');
+                  await notifyNewListings(site, 1, ilan.sehir || job.city);
                 } else if (wh.atilan > 0) {
                   sendProgress(`↩ ${site} · "${ilan.baslik?.slice(0, 30)}" → zaten mevcut`);
                 } else {
@@ -345,6 +723,18 @@ function buildJobs(cities, maxPages) {
 }
 
 // ─── Sekme Yardımcıları ───────────────────────────────────────────────────────
+async function setRandomViewport(tabId) {
+  const sizes = [
+    { w: 1280, h: 720 }, { w: 1366, h: 768 }, { w: 1440, h: 900 },
+    { w: 1536, h: 864 }, { w: 1600, h: 900 }, { w: 1920, h: 1080 },
+  ];
+  const { w, h } = sizes[Math.floor(Math.random() * sizes.length)];
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    await chrome.windows.update(tab.windowId, { width: w, height: h });
+  } catch (_) {}
+}
+
 function createTab(url) {
   return new Promise((resolve, reject) => {
     chrome.tabs.create({ url, active: false }, tab => {
@@ -520,8 +910,6 @@ function markGoruldu(ilanlar) {
   });
 }
 
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
 // ─── Sunucu DB'de hangi kaynak_id'ler zaten var? ──────────────────────────────
 // Detay sayfasına girmeden önce toplu kontrol — bot riskini dramatik azaltır
 async function checkServerIds(ilanlar) {
@@ -589,6 +977,28 @@ async function humanScroll() {
 async function sahibindenScript(tip, kategori, city) {
   const BASE = 'https://www.sahibinden.com';
 
+  async function simulateMousePresence() {
+    await new Promise(r => setTimeout(r, 1000 + Math.random() * 1500));
+    const moves = 6 + Math.floor(Math.random() * 8);
+    for (let i = 0; i < moves; i++) {
+      window.dispatchEvent(new MouseEvent('mousemove', {
+        clientX: 100 + Math.random() * (window.innerWidth - 200),
+        clientY: 100 + Math.random() * (window.innerHeight - 200),
+        movementX: Math.random() * 12 - 6, movementY: Math.random() * 10 - 5, bubbles: true,
+      }));
+      await new Promise(r => setTimeout(r, 150 + Math.random() * 600));
+    }
+  }
+
+  async function occasionalKeyPress() {
+    if (Math.random() > 0.05) return;
+    const k = [{ key: 'Tab', code: 'Tab' }, { key: 'ArrowDown', code: 'ArrowDown' }, { key: 'Escape', code: 'Escape' }];
+    const chosen = k[Math.floor(Math.random() * k.length)];
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: chosen.key, code: chosen.code, bubbles: true }));
+    await new Promise(r => setTimeout(r, 60 + Math.random() * 100));
+    document.dispatchEvent(new KeyboardEvent('keyup', { key: chosen.key, code: chosen.code, bubbles: true }));
+  }
+
   async function waitFor(selector, ms = 30000) {
     const start = Date.now();
     while (Date.now() - start < ms) {
@@ -614,6 +1024,8 @@ async function sahibindenScript(tip, kategori, city) {
     return;
   }
 
+  await simulateMousePresence();
+  await occasionalKeyPress();
   await quickScroll();
 
   const ilanlar = [];
@@ -704,6 +1116,13 @@ async function hepsiemlakScript(tip, kategori, city) {
   }
 
   await waitFor(SEL);
+  // Mouse varlığı
+  (async () => {
+    for (let i = 0; i < 6; i++) {
+      window.dispatchEvent(new MouseEvent('mousemove', { clientX: 100 + Math.random() * 800, clientY: 100 + Math.random() * 500, bubbles: true }));
+      await new Promise(r => setTimeout(r, 200 + Math.random() * 500));
+    }
+  })();
   await humanScroll();
 
   const ilanlar = [];
@@ -788,6 +1207,13 @@ async function emlakjetScript(tip, kategori, city) {
   }
 
   await waitFor();
+  // Mouse varlığı
+  (async () => {
+    for (let i = 0; i < 6; i++) {
+      window.dispatchEvent(new MouseEvent('mousemove', { clientX: 100 + Math.random() * 800, clientY: 100 + Math.random() * 500, bubbles: true }));
+      await new Promise(r => setTimeout(r, 200 + Math.random() * 500));
+    }
+  })();
   await humanScroll();
 
   const ilanlar = [];
@@ -847,6 +1273,19 @@ async function emlakjetScript(tip, kategori, city) {
 
 async function sahibindenDetailScript() {
   // ─── Yardımcılar ────────────────────────────────────────────────────────────
+  async function simulateMousePresence() {
+    await new Promise(r => setTimeout(r, 800 + Math.random() * 1200));
+    const moves = 8 + Math.floor(Math.random() * 10);
+    for (let i = 0; i < moves; i++) {
+      window.dispatchEvent(new MouseEvent('mousemove', {
+        clientX: 80 + Math.random() * (window.innerWidth - 160),
+        clientY: 80 + Math.random() * (window.innerHeight - 160),
+        movementX: Math.random() * 14 - 7, movementY: Math.random() * 12 - 6, bubbles: true,
+      }));
+      await new Promise(r => setTimeout(r, 100 + Math.random() * 500));
+    }
+  }
+
   async function waitFor(selector, ms = 25000) {
     const start = Date.now();
     while (Date.now() - start < ms) {
@@ -886,6 +1325,7 @@ async function sahibindenDetailScript() {
 
   // ─── Sayfa yüklensin ────────────────────────────────────────────────────────
   await waitFor('h1.classifiedDetailTitle, h1[class*="title"], .classifiedDetailMainPhoto', 25000);
+  await simulateMousePresence(); // Mouse varlığı oluştur
   await new Promise(r => setTimeout(r, 1500)); // JS render tamamlansın
 
   // Lazy load tetiklemek için hızlı scroll (bot algısı için değil, sadece görüntü yükleme)

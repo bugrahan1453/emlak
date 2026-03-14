@@ -27,6 +27,39 @@ function setLog(msg, type = '') {
   el.className   = `log-text ${type}`;
 }
 
+function updateSiteStatus(data) {
+  const area = $('site-status');
+  if (!area) return;
+  const sites = [
+    { key: 'sahibinden', label: 'Sahibinden', sessionKey: 'sessionActive_sahibinden' },
+    { key: 'hepsiemlak', label: 'Hepsiemlak' },
+    { key: 'emlakjet',   label: 'Emlakjet' },
+  ];
+  area.innerHTML = sites.map(s => {
+    let color = '#68d391'; let icon = '✅';
+    if (s.sessionKey) {
+      const active = data[s.sessionKey];
+      if (active === false) { color = '#fc8181'; icon = '⚠️'; }
+      else if (active === true) { color = '#68d391'; icon = '✅'; }
+      else { color = '#718096'; icon = '❓'; }
+    }
+    return `<span style="font-size:10px;color:${color};background:#1e2535;padding:2px 8px;border-radius:10px;">${icon} ${s.label}</span>`;
+  }).join('');
+
+  // Session banner
+  const banner = $('session-banner');
+  if (data.sessionActive_sahibinden === false && banner) {
+    banner.style.display = 'block';
+    banner.innerHTML = '⚠️ Sahibinden oturumu yok — <a href="#" id="refresh-session-link" style="color:#f6ad55;">Siteyi Aç</a>';
+    document.getElementById('refresh-session-link')?.addEventListener('click', e => {
+      e.preventDefault();
+      chrome.runtime.sendMessage({ type: 'refresh_session' });
+    });
+  } else if (banner) {
+    banner.style.display = 'none';
+  }
+}
+
 function refreshStatus() {
   chrome.runtime.sendMessage({ type: 'get_status' }, data => {
     if (chrome.runtime.lastError || !data) return;
@@ -37,6 +70,7 @@ function refreshStatus() {
     $('err-short').textContent  = data.lastError ? data.lastError.slice(0, 40) : '—';
 
     setStatus(data.isRunning, data.lastError);
+    updateSiteStatus(data);
 
     // Progress log
     if (data.progress?.msg) {
@@ -46,7 +80,7 @@ function refreshStatus() {
     // Hata banner
     const errArea = $('error-area');
     errArea.innerHTML = '';
-    if (data.lastError) {
+    if (data.lastError && !data.lastError.includes('oturum')) {
       const div = document.createElement('div');
       div.className   = 'error-banner';
       div.textContent = `Son hata: ${data.lastError}`;
@@ -70,18 +104,40 @@ function refreshStatus() {
 
 // ─── Yüklenince ──────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-  // Ayarları yükle
-  chrome.storage.sync.get({ cities: 'canakkale', intervalMinutes: 10, gunAraligi: 0 }, cfg => {
+  chrome.storage.sync.get({
+    cities: 'canakkale', intervalMinutes: 10, gunAraligi: 0,
+    captchaSolver: '', captchaApiKey: '',
+  }, cfg => {
     $('cities').value          = cfg.cities;
     $('intervalMinutes').value = cfg.intervalMinutes;
     $('gunAraligi').value      = cfg.gunAraligi;
+    $('captchaSolver').value   = cfg.captchaSolver || '';
+    $('captchaApiKey').value   = cfg.captchaApiKey || '';
+    toggleCaptchaTestRow();
   });
 
   refreshStatus();
-
-  // Canlı progress için 1sn polling (popup açıkken)
   const poll = setInterval(refreshStatus, 1500);
   window.addEventListener('unload', () => clearInterval(poll));
+});
+
+function toggleCaptchaTestRow() {
+  const row = $('captcha-test-row');
+  if (row) row.style.display = $('captchaSolver').value ? 'flex' : 'none';
+}
+$('captchaSolver')?.addEventListener('change', toggleCaptchaTestRow);
+
+// ─── CAPTCHA Key Test ─────────────────────────────────────────────────────────
+$('captcha-test-btn')?.addEventListener('click', () => {
+  const solver = $('captchaSolver').value;
+  const key    = $('captchaApiKey').value.trim();
+  const result = $('captcha-test-result');
+  if (!key) { result.textContent = 'Key gerekli'; result.style.color = '#fc8181'; return; }
+  result.textContent = 'Test ediliyor...'; result.style.color = '#a0aec0';
+  chrome.runtime.sendMessage({ type: 'test_captcha_key', solver, key }, res => {
+    if (res?.ok) { result.textContent = '✓ Geçerli'; result.style.color = '#68d391'; }
+    else { result.textContent = `✗ ${res?.error || 'Geçersiz'}`; result.style.color = '#fc8181'; }
+  });
 });
 
 // ─── Kaydet ───────────────────────────────────────────────────────────────────
@@ -91,6 +147,8 @@ $('save-btn').addEventListener('click', () => {
     intervalMinutes: parseInt($('intervalMinutes').value) || 10,
     gunAraligi:      parseInt($('gunAraligi').value) || 0,
     enabled:         true,
+    captchaSolver:   $('captchaSolver').value || '',
+    captchaApiKey:   $('captchaApiKey').value.trim() || '',
   };
   chrome.storage.sync.set(cfg, () => {
     setLog('Ayarlar kaydedildi', 'ok');
@@ -120,7 +178,6 @@ $('scrape-btn').addEventListener('click', () => {
   btn.textContent = '⏳ Başlatılıyor...';
   btn.className   = 'running';
 
-  // Ayarları önce kaydet
   const cfg = {
     cities:          $('cities').value.trim() || 'canakkale',
     intervalMinutes: parseInt($('intervalMinutes').value) || 10,
@@ -129,7 +186,6 @@ $('scrape-btn').addEventListener('click', () => {
 
   chrome.storage.sync.set(cfg, () => {
     setLog('Tarama başlatıldı...', '');
-
     chrome.runtime.sendMessage({ type: 'manual_scrape' }, res => {
       if (chrome.runtime.lastError || !res?.ok) {
         const errMsg = res?.error || chrome.runtime.lastError?.message || 'bilinmiyor';
@@ -137,5 +193,26 @@ $('scrape-btn').addEventListener('click', () => {
       }
       refreshStatus();
     });
+  });
+});
+
+// ─── Hata Kaydı ───────────────────────────────────────────────────────────────
+$('errorlog-btn').addEventListener('click', () => {
+  const area = $('errorlog-area');
+  const list = $('errorlog-list');
+  if (area.style.display !== 'none') { area.style.display = 'none'; return; }
+  chrome.runtime.sendMessage({ type: 'get_error_log' }, res => {
+    const log = res?.log || [];
+    if (!log.length) { list.innerHTML = '<div style="color:#4a5568">Kayıt yok</div>'; }
+    else {
+      list.innerHTML = log.slice(0, 15).map(e =>
+        `<div style="color:#a0aec0;margin-bottom:3px;border-bottom:1px solid #1e2535;padding-bottom:2px;">
+          <span style="color:#4a5568">${new Date(e.zaman).toLocaleString('tr-TR',{hour:'2-digit',minute:'2-digit'})}</span>
+          <span style="color:#fc8181;margin:0 4px">[${e.site}/${e.tip}]</span>
+          <span>${e.mesaj}</span>
+        </div>`
+      ).join('');
+    }
+    area.style.display = 'block';
   });
 });

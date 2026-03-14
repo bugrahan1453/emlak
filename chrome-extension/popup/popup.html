@@ -169,6 +169,13 @@
 
   <div id="error-area"></div>
 
+  <div id="session-banner" style="display:none;margin:0 14px 0;background:#2a1a00;border:1px solid #b7791f;border-radius:5px;padding:6px 10px;font-size:11px;color:#f6ad55;margin-bottom:0;"></div>
+
+  <div class="section">
+    <div class="section-title">Site Durumu</div>
+    <div id="site-status" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
+  </div>
+
   <div class="section">
     <div class="section-title">Ayarlar</div>
     <div class="form-row">
@@ -185,14 +192,42 @@
     </div>
   </div>
 
+  <div class="section">
+    <div class="section-title">CAPTCHA Çözücü <span style="color:#4a5568;font-weight:normal">(opsiyonel)</span></div>
+    <div class="form-row">
+      <label class="fl">Servis</label>
+      <select id="captchaSolver" style="background:#1e2535;border:1px solid #2d3748;border-radius:5px;padding:5px 8px;color:#e2e8f0;font-size:12px;flex:1;outline:none;">
+        <option value="">Kapalı</option>
+        <option value="capmonster">CapMonster (~₺0.5/1000)</option>
+        <option value="capsolver">CapSolver (~₺25/1000)</option>
+        <option value="2captcha">2Captcha (~₺75/1000)</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label class="fl">API Key</label>
+      <input type="text" id="captchaApiKey" placeholder="API anahtarınız">
+    </div>
+    <div class="form-row" id="captcha-test-row" style="display:none;">
+      <label class="fl"></label>
+      <button id="captcha-test-btn" style="background:#1e2535;border:1px solid #2d3748;color:#a0aec0;font-size:11px;padding:4px 10px;border-radius:4px;cursor:pointer;">Key Test Et</button>
+      <span id="captcha-test-result" style="font-size:11px;margin-left:8px;"></span>
+    </div>
+  </div>
+
   <div class="buttons">
     <button id="scrape-btn">▶ Şimdi Tara</button>
     <button id="stop-btn">⏹ Durdur</button>
     <button id="save-btn">💾 Kaydet</button>
     <button id="clear-btn" style="grid-column:1/-1">🗑 Önbelleği Temizle (tüm ilanları yeniden tara)</button>
+    <button id="errorlog-btn" style="grid-column:1/-1;background:#1a1f2e;border:1px solid #2d3748;color:#718096;font-size:11px;">📋 Hata Kaydı</button>
   </div>
 
-  <div class="footer">hetagayrimenkul.com · EmlakRadar v1.1</div>
+  <div id="errorlog-area" style="display:none;padding:8px 14px;font-size:10px;background:#0d1117;border-top:1px solid #1e2535;max-height:120px;overflow-y:auto;">
+    <div style="color:#4a5568;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:5px;">Son Hatalar</div>
+    <div id="errorlog-list"></div>
+  </div>
+
+  <div class="footer">hetagayrimenkul.com · EmlakRadar v2.0</div>
 
   <script src="popup.js"></script>
 </body>
