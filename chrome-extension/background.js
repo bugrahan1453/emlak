@@ -491,14 +491,23 @@ async function sahibindenScript(tip, kategori, city) {
     return false;
   }
 
+  async function quickScroll() {
+    const total = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+    for (let y = 0; y < total; y += 300) {
+      window.scrollTo(0, y);
+      await new Promise(r => setTimeout(r, 80));
+    }
+    window.scrollTo(0, 0);
+    await new Promise(r => setTimeout(r, 300));
+  }
+
   const found = await waitFor('tr.searchResultsItem');
   if (!found) {
     chrome.runtime.sendMessage({ type: 'emlakradar_page', ilanlar: [], nextUrl: null });
     return;
   }
 
-  // İnsan gibi scroll
-  await humanScroll();
+  await quickScroll();
 
   const ilanlar = [];
   document.querySelectorAll('tr.searchResultsItem').forEach(satir => {
