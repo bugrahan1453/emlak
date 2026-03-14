@@ -135,8 +135,14 @@ $('captcha-test-btn')?.addEventListener('click', () => {
   if (!key) { result.textContent = 'Key gerekli'; result.style.color = '#fc8181'; return; }
   result.textContent = 'Test ediliyor...'; result.style.color = '#a0aec0';
   chrome.runtime.sendMessage({ type: 'test_captcha_key', solver, key }, res => {
-    if (res?.ok) { result.textContent = '✓ Geçerli'; result.style.color = '#68d391'; }
-    else { result.textContent = `✗ ${res?.error || 'Geçersiz'}`; result.style.color = '#fc8181'; }
+    if (res?.ok) {
+      const bal = res.balance != null ? ` — $${parseFloat(res.balance).toFixed(3)}` : '';
+      result.textContent = `✓ Geçerli${bal}`;
+      result.style.color = '#68d391';
+    } else {
+      result.textContent = `✗ ${res?.error || 'Geçersiz key'}`;
+      result.style.color = '#fc8181';
+    }
   });
 });
 

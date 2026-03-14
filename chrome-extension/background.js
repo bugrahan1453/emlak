@@ -178,13 +178,19 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   if (msg.type === 'test_captcha_key') {
     const { solver, key } = msg;
-    const api = CAPTCHA_APIS[solver];
-    if (!api) { sendResponse({ ok: false, error: 'Bilinmeyen servis' }); return true; }
-    fetch(api.create, {
+    const balanceUrls = {
+      capmonster: 'https://api.capmonster.cloud/getBalance',
+      capsolver:  'https://api.capsolver.com/getBalance',
+      '2captcha': 'https://api.2captcha.com/getBalance',
+    };
+    const url = balanceUrls[solver];
+    if (!url) { sendResponse({ ok: false, error: 'Bilinmeyen servis' }); return true; }
+    fetch(url, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ clientKey: key, task: { type: 'TurnstileTaskProxyless', websiteURL: 'https://example.com', websiteKey: 'test' } }),
+      body: JSON.stringify({ clientKey: key }),
     }).then(r => r.json()).then(d => {
-      sendResponse({ ok: d.errorId === 0 || d.taskId != null, balance: d.balance });
+      const ok = d.errorId === 0 && d.balance != null;
+      sendResponse({ ok, balance: d.balance, error: d.errorDescription || null });
     }).catch(e => sendResponse({ ok: false, error: e.message }));
     return true;
   }
