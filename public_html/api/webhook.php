@@ -288,10 +288,27 @@ switch ($tip) {
         jsonResponse(true, ['durum' => 'islendi']);
         break;
 
-    default:
-        http_response_code(400);
-        echo json_encode(['error' => "Bilinmeyen olay tipi: {$tip}"]);
-        exit;
+    // ── KAYNAK ID KONTROL: hangileri DB'de var? ────────────────────────────
+    case 'check_ids':
+        $ids    = $payload['ids']    ?? [];
+        $site   = $payload['site']   ?? '';
+        if (empty($ids) || !$site) {
+            jsonResponse(true, ['mevcut' => []]);
+        }
+
+        // Güvenli parametre binding — max 200 ID
+        $ids = array_slice(array_map('strval', $ids), 0, 200);
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $pdo->prepare(
+            "SELECT kaynak_id FROM ilanlar WHERE kaynak_site = ? AND kaynak_id IN ($placeholders)"
+        );
+        $stmt->execute([$site, ...$ids]);
+        $mevcut = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+        jsonResponse(true, ['mevcut' => $mevcut]);
+        break;
+
+
 }
 
 // ── Yardımcı: Dış fotoğraf URL'lerini sunucuya indir ──────────────────────

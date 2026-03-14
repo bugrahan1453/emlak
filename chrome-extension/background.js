@@ -176,6 +176,21 @@ async function runAllScrapers(force = false) {
 
             sendProgress(`${site} · sayfa ${page}: ${ilanlar.length} ilan, ${yeniler.length} yeni`);
 
+            // ── Sunucuya sor: hangisi zaten var? Yokları için detaya gir ──
+            if (yeniler.length > 0) {
+              const mevcutIds = await checkServerIds(yeniler);
+              if (mevcutIds.size > 0) {
+                // Sunucuda zaten olanları seenIds'e ekle, listeden çıkar
+                const serverMevcut = yeniler.filter(i => mevcutIds.has(i.kaynak_id));
+                await markGoruldu(serverMevcut);
+                yeniler = yeniler.filter(i => !mevcutIds.has(i.kaynak_id));
+                if (serverMevcut.length > 0)
+                  sendProgress(`${site}: ${serverMevcut.length} ilan sunucuda zaten mevcut, atlandı`);
+              }
+            }
+
+            sendProgress(`${site} · sayfa ${page}: ${yeniler.length} gerçekten yeni ilan detay sayfasına girilecek`);
+
             // ── Her ilan için: detay sayfasına gir → siteye kaydet ─────────
             for (let i = 0; i < yeniler.length; i++) {
               if (shouldStop) break;
@@ -223,9 +238,11 @@ async function runAllScrapers(force = false) {
                 // Hata varsa işaretleme — sıradaki turda tekrar denenecek
               }
 
-              // İlanlar arası bekleme (bot algısını önlemek için)
+              // İlanlar arası bekleme: 45–90sn (detay sayfası ziyaretleri arası)
               if (!shouldStop && i < yeniler.length - 1) {
-                await sleep(25000 + Math.random() * 25000);
+                const bekle = 45000 + Math.random() * 45000;
+                sendProgress(`${site}: sıradaki ilan için ${Math.round(bekle/1000)}sn bekleniyor...`);
+                await sleep(bekle);
               }
             }
 
@@ -473,6 +490,39 @@ function markGoruldu(ilanlar) {
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ─── Sunucu DB'de hangi kaynak_id'ler zaten var? ──────────────────────────────
+// Detay sayfasına girmeden önce toplu kontrol — bot riskini dramatik azaltır
+async function checkServerIds(ilanlar) {
+  if (!ilanlar.length) return new Set();
+
+  // Site bazında grupla
+  const bySite = {};
+  for (const ilan of ilanlar) {
+    const site = ilan.kaynak_site;
+    if (!bySite[site]) bySite[site] = [];
+    bySite[site].push(ilan.kaynak_id);
+  }
+
+  const mevcutIds = new Set();
+  for (const [site, ids] of Object.entries(bySite)) {
+    try {
+      const body = JSON.stringify({ tip: 'check_ids', site, ids });
+      const sig  = await signPayload(body, WEBHOOK_SECRET);
+      const res  = await fetch(API_URL, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Webhook-Signature': sig },
+        body,
+      });
+      if (!res.ok) continue;
+      const json = await res.json().catch(() => ({}));
+      (json.data?.mevcut || []).forEach(id => mevcutIds.add(id));
+    } catch (e) {
+      console.warn('[EmlakRadar] checkServerIds hata:', e.message);
+    }
+  }
+  return mevcutIds;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LİSTE CONTENT SCRIPTS — sadece mevcut sayfayı parse eder, nextUrl döner
