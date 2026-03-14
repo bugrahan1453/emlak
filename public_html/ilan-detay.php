@@ -38,7 +38,8 @@ require_once APP_DIR . '/views/layout/header.php';
       x-data="{
           aktifFoto: 0, modalAcik: false, silOnay: false,
           aiYukleniyor: {}, aiSonuc: {},
-          sesliNotAcik: false
+          sesliNotAcik: false,
+          fotoUrls: <?= json_encode(array_values(array_map($fotoUrl, $fotograflar)), JSON_UNESCAPED_UNICODE) ?>
       }">
 
     <!-- Breadcrumb -->
@@ -64,13 +65,12 @@ require_once APP_DIR . '/views/layout/header.php';
             ?>
             <?php if (!empty($fotograflar)): ?>
             <div class="rounded-2xl overflow-hidden" style="background: rgba(15,23,62,0.6); border: 1px solid rgba(255,255,255,0.06);">
-                <div class="relative overflow-hidden cursor-pointer" style="aspect-ratio:4/3; background:#0a0f2e;" @click="modalAcik = true">
-                    <?php foreach ($fotograflar as $fi => $foto): ?>
-                    <img src="<?= $fotoUrl($foto) ?>"
-                         class="absolute inset-0 w-full h-full object-contain transition-opacity duration-300"
-                         :class="aktifFoto === <?= $fi ?> ? 'opacity-100' : 'opacity-0'"
+                <!-- Ana foto: doğal boyut, sıfır kırpma -->
+                <div class="relative cursor-pointer" style="background:#000;" @click="modalAcik = true">
+                    <img :src="fotoUrls[aktifFoto]"
+                         class="w-full block"
+                         style="max-height:80vh; object-fit:contain;"
                          loading="lazy">
-                    <?php endforeach; ?>
                     <div class="absolute bottom-3 right-3 text-xs px-2 py-1 rounded-full"
                          style="background: rgba(0,0,0,0.6); color: white;">
                         <span x-text="aktifFoto + 1"></span>/<?= count($fotograflar) ?>
