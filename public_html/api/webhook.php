@@ -116,7 +116,8 @@ switch ($tip) {
                 }
 
                 $ilanData = mapIlanData($i);
-                if (!$ilanData['baslik'] || !$ilanData['fiyat']) { $atilan++; continue; }
+                if (!$ilanData['baslik']) { $atilan++; continue; }
+                // Fiyat 0 ise logla ama kaydetmeye devam et (fiyat çekilememiş olabilir)
 
                 $yeniId = $ilanModel->create($ilanData);
                 $eklenen++;

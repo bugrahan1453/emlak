@@ -207,10 +207,16 @@ async function runAllScrapers(force = false) {
                 };
 
                 // ── Anında siteye gönder ─────────────────────────────────
-                await sendWebhook([full], cfg);
+                const wh = await sendWebhook([full], cfg);
                 await markGoruldu([full]);
-                toplamYeni++;
-                sendProgress(`✓ ${site} · "${ilan.baslik?.slice(0, 30)}" → siteye eklendi`, 'ok');
+                if (wh.eklenen > 0) {
+                  toplamYeni++;
+                  sendProgress(`✓ ${site} · "${ilan.baslik?.slice(0, 30)}" → siteye eklendi`, 'ok');
+                } else if (wh.atilan > 0) {
+                  sendProgress(`↩ ${site} · "${ilan.baslik?.slice(0, 30)}" → zaten mevcut, atlandı`);
+                } else {
+                  sendProgress(`⚠ ${site} · "${ilan.baslik?.slice(0, 30)}" → kaydedilemedi (fiyat/başlık eksik?)`, 'error');
+                }
 
               } catch (err) {
                 console.warn('[EmlakRadar] Detay hatası:', err.message);
@@ -412,7 +418,9 @@ function getDetailFn(site) {
 }
 
 // ─── Webhook Gönder ───────────────────────────────────────────────────────────
+// Döndürür: { eklenen, atilan, errors }
 async function sendWebhook(ilanlar, _cfg) {
+  let totalEklenen = 0, totalAtilan = 0;
   const BATCH = 10;
   for (let i = 0; i < ilanlar.length; i += BATCH) {
     const batch = ilanlar.slice(i, i + BATCH);
@@ -439,7 +447,10 @@ async function sendWebhook(ilanlar, _cfg) {
     }
     const json = await res.json().catch(() => ({}));
     console.log('[EmlakRadar] Webhook yanıtı:', json);
+    totalEklenen += json.data?.eklenen ?? json.eklenen ?? 0;
+    totalAtilan  += json.data?.atilan  ?? json.atilan  ?? 0;
   }
+  return { eklenen: totalEklenen, atilan: totalAtilan };
 }
 
 // ─── Deduplication ────────────────────────────────────────────────────────────
