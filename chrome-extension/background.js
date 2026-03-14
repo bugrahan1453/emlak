@@ -302,14 +302,12 @@ function injectOnce(tabId, job) {
 }
 
 // ─── Detay Sayfası Scraper ────────────────────────────────────────────────────
-const MAX_DETAIL_PER_RUN = 20; // Tek seferde en fazla 20 detay sayfası aç
+const MAX_DETAIL_PER_RUN = 5; // Bot algısını önlemek için tek seferde max 5 detay
 
 async function scrapeDetails(tabId, ilanlar, site) {
   const detailFn = getDetailFn(site);
   if (!detailFn) return ilanlar;
 
-  // Çok fazla yeni ilan varsa ilk MAX_DETAIL_PER_RUN tanesini detayla çek,
-  // kalanları detaysız (liste verisiyle) kaydet — sıradaki taramada detaylanır
   const detayliIlanlar  = ilanlar.slice(0, MAX_DETAIL_PER_RUN);
   const detaysizIlanlar = ilanlar.slice(MAX_DETAIL_PER_RUN);
 
@@ -321,11 +319,16 @@ async function scrapeDetails(tabId, ilanlar, site) {
     if (!ilan.kaynak_url) { zengin.push(ilan); continue; }
     try {
       await navigateTab(tabId, ilan.kaynak_url);
+
       if (await checkBotBlock(tabId)) {
-        sendProgress('⚠️ Bot bloğu (detay) — 5 dk bekleniyor', 'error');
-        await sleep(5 * 60 * 1000);
-        zengin.push(ilan); continue;
+        // Bot algısı: bu turu durdur, kalanları detaysız ekle, sıradaki taramada yakalanır
+        sendProgress('⚠️ Bot bloğu — bu tur durduruldu, 10 dk sonra tekrar denenecek', 'error');
+        zengin.push(ilan);
+        zengin.push(...detayliIlanlar.slice(idx));
+        zengin.push(...detaysizIlanlar);
+        return zengin;
       }
+
       const detail = await injectDetail(tabId, detailFn);
       zengin.push({
         ...ilan,
@@ -345,10 +348,13 @@ async function scrapeDetails(tabId, ilanlar, site) {
       console.warn('[EmlakRadar] Detay hatası:', ilan.kaynak_url, err.message);
       zengin.push(ilan);
     }
-    await sleep(4000 + Math.random() * 4000);
+
+    // Detay sayfaları arası: 25–50 saniye (bot algısını önlemek için)
+    if (idx < detayliIlanlar.length) {
+      await sleep(25000 + Math.random() * 25000);
+    }
   }
 
-  // Detay çekilemeyen ilanları olduğu gibi ekle (sıradaki taramada yakalanır)
   zengin.push(...detaysizIlanlar);
   return zengin;
 }
