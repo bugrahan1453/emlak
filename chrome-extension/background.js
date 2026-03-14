@@ -786,34 +786,18 @@ function navigateTab(tabId, url) {
   });
 }
 
-function injectOnce(tabId, job) {
-  return new Promise(resolve => {
-    let done = false;
-    const timer = setTimeout(() => {
-      if (done) return; done = true;
-      chrome.runtime.onMessage.removeListener(onMsg);
-      resolve({ ilanlar: [], nextUrl: null });
-    }, 60000);
-
-    function onMsg(msg, sender) {
-      if (sender.tab?.id !== tabId || msg.type !== 'emlakradar_page') return;
-      if (done) return; done = true;
-      clearTimeout(timer); chrome.runtime.onMessage.removeListener(onMsg);
-      resolve({ ilanlar: msg.ilanlar || [], nextUrl: msg.nextUrl || null });
-    }
-    chrome.runtime.onMessage.addListener(onMsg);
-
-    chrome.scripting.executeScript({
+async function injectOnce(tabId, job) {
+  try {
+    const results = await chrome.scripting.executeScript({
       target: { tabId },
       func:   getContentFn(job.site),
       args:   [job.tip, job.kategori, job.city],
-    }).catch(err => {
-      if (done) return; done = true;
-      clearTimeout(timer); chrome.runtime.onMessage.removeListener(onMsg);
-      console.error('[EmlakRadar] executeScript hata:', err.message);
-      resolve({ ilanlar: [], nextUrl: null });
     });
-  });
+    return results?.[0]?.result || { ilanlar: [], nextUrl: null };
+  } catch (err) {
+    console.error('[EmlakRadar] executeScript hata:', err.message);
+    return { ilanlar: [], nextUrl: null };
+  }
 }
 
 // ─── Türkçe tarih → gün farkı (Sahibinden formatı) ───────────────────────────
@@ -835,29 +819,17 @@ function ilanGunFarki(tarihStr) {
   return 999;
 }
 
-function injectDetail(tabId, fn) {
-  return new Promise(resolve => {
-    let done = false;
-    const timer = setTimeout(() => {
-      if (done) return; done = true;
-      chrome.runtime.onMessage.removeListener(onMsg);
-      resolve({});
-    }, 90000); // 90 saniye — humanScroll + sayfa yükleme için yeterli
-
-    function onMsg(msg, sender) {
-      if (sender.tab?.id !== tabId || msg.type !== 'emlakradar_detail') return;
-      if (done) return; done = true;
-      clearTimeout(timer); chrome.runtime.onMessage.removeListener(onMsg);
-      resolve(msg.data || {});
-    }
-    chrome.runtime.onMessage.addListener(onMsg);
-
-    chrome.scripting.executeScript({ target: { tabId }, func: fn }).catch(err => {
-      if (done) return; done = true;
-      clearTimeout(timer); chrome.runtime.onMessage.removeListener(onMsg);
-      resolve({});
+async function injectDetail(tabId, fn) {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func:   fn,
     });
-  });
+    return results?.[0]?.result || {};
+  } catch (err) {
+    console.error('[EmlakRadar] injectDetail hata:', err.message);
+    return {};
+  }
 }
 
 function getContentFn(site) {
@@ -865,7 +837,7 @@ function getContentFn(site) {
     case 'sahibinden': return sahibindenScript;
     case 'hepsiemlak': return hepsiemlakScript;
     case 'emlakjet':   return emlakjetScript;
-    default: return () => chrome.runtime.sendMessage({ type: 'emlakradar_page', ilanlar: [], nextUrl: null });
+    default: return () => ({ ilanlar: [], nextUrl: null });
   }
 }
 
@@ -1043,8 +1015,7 @@ async function sahibindenScript(tip, kategori, city) {
 
   const found = await waitFor('tr.searchResultsItem');
   if (!found) {
-    chrome.runtime.sendMessage({ type: 'emlakradar_page', ilanlar: [], nextUrl: null });
-    return;
+    return { ilanlar: [], nextUrl: null };
   }
 
   await simulateMousePresence();
@@ -1107,7 +1078,7 @@ async function sahibindenScript(tip, kategori, city) {
     nextUrl = href.startsWith('http') ? href : BASE + href;
   }
 
-  chrome.runtime.sendMessage({ type: 'emlakradar_page', ilanlar, nextUrl });
+  return { ilanlar, nextUrl };
 }
 
 async function hepsiemlakScript(tip, kategori, city) {
@@ -1198,7 +1169,7 @@ async function hepsiemlakScript(tip, kategori, city) {
     const href = nextEl.getAttribute('href') || '';
     nextUrl = href.startsWith('http') ? href : BASE + href;
   }
-  chrome.runtime.sendMessage({ type: 'emlakradar_page', ilanlar, nextUrl });
+  return { ilanlar, nextUrl };
 }
 
 async function emlakjetScript(tip, kategori, city) {
@@ -1287,7 +1258,7 @@ async function emlakjetScript(tip, kategori, city) {
     const href = nextEl.getAttribute('href') || '';
     nextUrl = href.startsWith('http') ? href : BASE + href;
   }
-  chrome.runtime.sendMessage({ type: 'emlakradar_page', ilanlar, nextUrl });
+  return { ilanlar, nextUrl };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1497,22 +1468,19 @@ async function sahibindenDetailScript() {
     document.querySelector('input[name="lng"]')?.value || ''
   ) || null;
 
-  chrome.runtime.sendMessage({
-    type: 'emlakradar_detail',
-    data: {
-      aciklama,
-      fotograflar: imgs,
-      oda_sayisi:  findAttr('oda sayısı', 'oda sayisi', 'oda'),
-      metrekare:   parseFloat((findAttr('m²', 'brüt', 'net m²', 'alan') || '').replace(/[^\d,]/g, '').replace(',', '.')) || null,
-      kat:         findAttr('bulunduğu kat', 'kat bilgisi', 'kat'),
-      bina_yasi:   findAttr('bina yaşı', 'bina yasi', 'yapı yaşı'),
-      isitma:      findAttr('ısıtma', 'isitma', 'ısıtma tipi'),
-      banyo:       findAttr('banyo sayısı', 'banyo'),
-      satici_ad,
-      satici_tel,
-      konum: (lat && lng) ? { lat, lng } : null,
-    },
-  });
+  return {
+    aciklama,
+    fotograflar: imgs,
+    oda_sayisi:  findAttr('oda sayısı', 'oda sayisi', 'oda'),
+    metrekare:   parseFloat((findAttr('m²', 'brüt', 'net m²', 'alan') || '').replace(/[^\d,]/g, '').replace(',', '.')) || null,
+    kat:         findAttr('bulunduğu kat', 'kat bilgisi', 'kat'),
+    bina_yasi:   findAttr('bina yaşı', 'bina yasi', 'yapı yaşı'),
+    isitma:      findAttr('ısıtma', 'isitma', 'ısıtma tipi'),
+    banyo:       findAttr('banyo sayısı', 'banyo'),
+    satici_ad,
+    satici_tel,
+    konum: (lat && lng) ? { lat, lng } : null,
+  };
 }
 
 async function hepsiemlakDetailScript() {
@@ -1588,20 +1556,17 @@ async function hepsiemlakDetailScript() {
   const lat = parseFloat(document.querySelector('[data-lat]')?.getAttribute('data-lat') || '') || null;
   const lng = parseFloat(document.querySelector('[data-lng]')?.getAttribute('data-lng') || '') || null;
 
-  chrome.runtime.sendMessage({
-    type: 'emlakradar_detail',
-    data: {
-      aciklama, fotograflar: imgs,
-      oda_sayisi: findAttr('oda sayısı', 'oda'),
-      metrekare:  parseFloat((findAttr('m²', 'brüt', 'net', 'alan') || '').replace(/[^\d,]/g,'').replace(',','.')) || null,
-      kat:        findAttr('kat', 'bulunduğu kat'),
-      bina_yasi:  findAttr('bina yaşı', 'yapı yaşı'),
-      isitma:     findAttr('ısıtma'),
-      banyo:      findAttr('banyo'),
-      satici_ad, satici_tel,
-      konum: (lat && lng) ? { lat, lng } : null,
-    },
-  });
+  return {
+    aciklama, fotograflar: imgs,
+    oda_sayisi: findAttr('oda sayısı', 'oda'),
+    metrekare:  parseFloat((findAttr('m²', 'brüt', 'net', 'alan') || '').replace(/[^\d,]/g,'').replace(',','.')) || null,
+    kat:        findAttr('kat', 'bulunduğu kat'),
+    bina_yasi:  findAttr('bina yaşı', 'yapı yaşı'),
+    isitma:     findAttr('ısıtma'),
+    banyo:      findAttr('banyo'),
+    satici_ad, satici_tel,
+    konum: (lat && lng) ? { lat, lng } : null,
+  };
 }
 
 async function emlakjetDetailScript() {
@@ -1674,18 +1639,15 @@ async function emlakjetDetailScript() {
   const lat = parseFloat(document.querySelector('[data-lat]')?.getAttribute('data-lat') || '') || null;
   const lng = parseFloat(document.querySelector('[data-lng]')?.getAttribute('data-lng') || '') || null;
 
-  chrome.runtime.sendMessage({
-    type: 'emlakradar_detail',
-    data: {
-      aciklama, fotograflar: imgs,
-      oda_sayisi: findAttr('oda sayısı', 'oda'),
-      metrekare:  parseFloat((findAttr('m²', 'alan', 'brüt') || '').replace(/[^\d,]/g,'').replace(',','.')) || null,
-      kat:        findAttr('kat', 'bulunduğu kat'),
-      bina_yasi:  findAttr('bina yaşı', 'yapı yaşı'),
-      isitma:     findAttr('ısıtma'),
-      banyo:      findAttr('banyo'),
-      satici_ad, satici_tel,
-      konum: (lat && lng) ? { lat, lng } : null,
-    },
-  });
+  return {
+    aciklama, fotograflar: imgs,
+    oda_sayisi: findAttr('oda sayısı', 'oda'),
+    metrekare:  parseFloat((findAttr('m²', 'alan', 'brüt') || '').replace(/[^\d,]/g,'').replace(',','.')) || null,
+    kat:        findAttr('kat', 'bulunduğu kat'),
+    bina_yasi:  findAttr('bina yaşı', 'yapı yaşı'),
+    isitma:     findAttr('ısıtma'),
+    banyo:      findAttr('banyo'),
+    satici_ad, satici_tel,
+    konum: (lat && lng) ? { lat, lng } : null,
+  };
 }
