@@ -218,6 +218,7 @@ async function checkSessionBeforeScrape() {
       return false;
     }
     await chrome.storage.local.set({ sessionActive_sahibinden: true, lastError: '' });
+    return true; // cf_clearance yoksa ama login cookie'ler varsa oturum geçerli
   }
   if (cfCookie.expirationDate && (cfCookie.expirationDate * 1000 - Date.now()) < 5 * 60 * 1000) {
     sendProgress('⚠️ Sahibinden oturumu bitmek üzere — siteyi tekrar ziyaret edin', 'error');
@@ -530,7 +531,8 @@ async function _runAllScrapersInner(force = false) {
 
       // Sahibinden için oturum kontrolü
     if (site === 'sahibinden') {
-      const ok = await checkSessionBeforeScrape();
+      let ok = false;
+      try { ok = await checkSessionBeforeScrape(); } catch (e) { ok = true; } // crash = devam et
       if (!ok) { sendProgress(`⚠️ Sahibinden atlandı — oturum yok`, 'error'); continue; }
     }
 
