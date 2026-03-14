@@ -132,7 +132,7 @@ chrome.cookies.onChanged.addListener((changeInfo) => {
   }
 
   if (!removed && (cookie.name === 'vid' || cookie.name === 'st' || cookie.name === 'MS1')) {
-    chrome.storage.local.set({ loginActive_sahibinden: true });
+    chrome.storage.local.set({ loginActive_sahibinden: true, sessionActive_sahibinden: true, lastError: '' });
   }
 });
 
@@ -205,9 +205,19 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 async function checkSessionBeforeScrape() {
   const cfCookie = await chrome.cookies.get({ url: 'https://www.sahibinden.com', name: 'cf_clearance' }).catch(() => null);
   if (!cfCookie) {
-    sendProgress('⚠️ Sahibinden cf_clearance yok — siteye önce giriş yapın', 'error');
-    await chrome.storage.local.set({ sessionActive_sahibinden: false });
-    return false;
+    // cf_clearance yoksa giriş çerezlerini kontrol et (Cloudflare challenge göstermeden geçince olur)
+    const loginCookies = await Promise.all([
+      chrome.cookies.get({ url: 'https://www.sahibinden.com', name: 'vid' }).catch(() => null),
+      chrome.cookies.get({ url: 'https://www.sahibinden.com', name: 'st' }).catch(() => null),
+      chrome.cookies.get({ url: 'https://www.sahibinden.com', name: 'MS1' }).catch(() => null),
+    ]);
+    const hasLogin = loginCookies.some(Boolean);
+    if (!hasLogin) {
+      sendProgress('⚠️ Sahibinden oturumu yok — siteye giriş yapın', 'error');
+      await chrome.storage.local.set({ sessionActive_sahibinden: false });
+      return false;
+    }
+    await chrome.storage.local.set({ sessionActive_sahibinden: true, lastError: '' });
   }
   if (cfCookie.expirationDate && (cfCookie.expirationDate * 1000 - Date.now()) < 5 * 60 * 1000) {
     sendProgress('⚠️ Sahibinden oturumu bitmek üzere — siteyi tekrar ziyaret edin', 'error');
