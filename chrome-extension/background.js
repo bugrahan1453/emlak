@@ -189,20 +189,51 @@ async function runAllScrapers(force = false) {
               }
             }
 
-            sendProgress(`${site} · sayfa ${page}: ${yeniler.length} gerçekten yeni ilan detay sayfasına girilecek`);
+            sendProgress(`${site} · sayfa ${page}: ${yeniler.length} gerçekten yeni ilan detaya girilecek`);
 
             // ── Her ilan için: detay sayfasına gir → siteye kaydet ─────────
+            const listSayfasi = nextUrl || job.url; // detaylar arası dönülecek sayfa
+            let botBan = false;
+
             for (let i = 0; i < yeniler.length; i++) {
-              if (shouldStop) break;
+              if (shouldStop || botBan) break;
               const ilan = yeniler[i];
-              sendProgress(`${site} · sayfa ${page} · ilan ${i + 1}/${yeniler.length}: ${ilan.baslik?.slice(0, 35)}...`);
+              sendProgress(`${site} · ilan ${i + 1}/${yeniler.length}: ${ilan.baslik?.slice(0, 35)}...`);
 
               try {
                 await navigateTab(tabId, ilan.kaynak_url);
 
-                if (await checkBotBlock(tabId)) {
-                  sendProgress('⚠️ Bot bloğu — detay durduruluyor', 'error');
-                  shouldStop = true; break;
+                // 404 / süresi dolmuş ilan kontrolü — ban tetiklemez, atla
+                const pageState = await chrome.scripting.executeScript({
+                  target: { tabId },
+                  func: () => {
+                    const txt = document.body?.textContent || '';
+                    const url = location.href;
+                    if (txt.includes('bulunamıyor') || txt.includes('Bulunamıyor') ||
+                        url.includes('404') || document.title.includes('404'))
+                      return 'not_found';
+                    if (txt.includes('Olağan dışı') || txt.includes('olagan-disi') ||
+                        url.includes('olagan-disi'))
+                      return 'bot_ban';
+                    return 'ok';
+                  },
+                }).catch(() => [{ result: 'ok' }]);
+                const durum = pageState?.[0]?.result || 'ok';
+
+                if (durum === 'not_found') {
+                  sendProgress(`${site}: ilan bulunamadı (silinmiş?), atlanıyor`);
+                  await markGoruldu([ilan]); // tekrar deneme
+                  continue;
+                }
+                if (durum === 'bot_ban') {
+                  sendProgress(`⚠️ ${site} bot bloğu — 15dk bekleniyor...`, 'error');
+                  botBan = true;
+                  await sleep(15 * 60 * 1000); // 15 dakika bekle
+                  botBan = false;
+                  sendProgress(`${site}: bekleme bitti, devam ediliyor`);
+                  // Bu ilanı tekrar dene
+                  i--;
+                  continue;
                 }
 
                 const detail = await injectDetail(tabId, detailFn);
@@ -221,28 +252,28 @@ async function runAllScrapers(force = false) {
                   konum:       detail.konum        || ilan.konum,
                 };
 
-                // ── Anında siteye gönder ─────────────────────────────────
                 const wh = await sendWebhook([full], cfg);
                 await markGoruldu([full]);
                 if (wh.eklenen > 0) {
                   toplamYeni++;
                   sendProgress(`✓ ${site} · "${ilan.baslik?.slice(0, 30)}" → siteye eklendi`, 'ok');
                 } else if (wh.atilan > 0) {
-                  sendProgress(`↩ ${site} · "${ilan.baslik?.slice(0, 30)}" → zaten mevcut, atlandı`);
+                  sendProgress(`↩ ${site} · "${ilan.baslik?.slice(0, 30)}" → zaten mevcut`);
                 } else {
-                  sendProgress(`⚠ ${site} · "${ilan.baslik?.slice(0, 30)}" → kaydedilemedi (fiyat/başlık eksik?)`, 'error');
+                  sendProgress(`⚠ ${site} · kaydedilemedi`, 'error');
                 }
 
               } catch (err) {
                 console.warn('[EmlakRadar] Detay hatası:', err.message);
-                // Hata varsa işaretleme — sıradaki turda tekrar denenecek
               }
 
-              // İlanlar arası bekleme: 45–90sn (detay sayfası ziyaretleri arası)
-              if (!shouldStop && i < yeniler.length - 1) {
-                const bekle = 45000 + Math.random() * 45000;
-                sendProgress(`${site}: sıradaki ilan için ${Math.round(bekle/1000)}sn bekleniyor...`);
-                await sleep(bekle);
+              // ── Detaylar arası: liste sayfasına dön, kısa bekle, sonraki ──
+              // İnsan davranışı: detay → geri → liste → detay (pattern kırılır)
+              if (!shouldStop && !botBan && i < yeniler.length - 1) {
+                const bekle = 20000 + Math.random() * 20000; // 20-40sn
+                sendProgress(`${site}: liste sayfasına dönüyor, ${Math.round(bekle/1000)}sn sonra devam...`);
+                await navigateTab(tabId, listSayfasi); // geri dön
+                await sleep(bekle);                     // listede oku
               }
             }
 
