@@ -552,13 +552,14 @@ async function _runAllScrapersInner(force = false) {
     }
 
     try {
+        let siteBanned = false;
         for (const job of siteJobs) {
-          if (shouldStop) break;
+          if (shouldStop || siteBanned) break;
           let nextUrl = job.url;
           let page    = 0;
 
           // ── Kategori: sayfa sayfa ilerle ─────────────────────────────────
-          while (nextUrl && page < (job.maxPages || MAX_PAGES) && !shouldStop) {
+          while (nextUrl && page < (job.maxPages || MAX_PAGES) && !shouldStop && !siteBanned) {
             page++;
             sendProgress(`${site} · ${job.kategori} · sayfa ${page} — liste tarıyor...`);
 
@@ -566,9 +567,9 @@ async function _runAllScrapersInner(force = false) {
 
             if (await checkBotBlock(tabId)) {
               const botMsg = `Bot bloğu/Cloudflare — sayfa atlandı: ${nextUrl}`;
-              sendProgress(`⚠️ ${site} bot bloğu — site atlanıyor`, 'error');
+              sendProgress(`⚠️ ${site} bot bloğu — site atlanıyor, diğer siteye geçiliyor`, 'error');
               await logError(site, 'bot_block_liste', botMsg);
-              nextUrl = null; break;
+              siteBanned = true; nextUrl = null; break;
             }
 
             // Liste sayfasındaki ilanlar
@@ -609,11 +610,10 @@ async function _runAllScrapersInner(force = false) {
 
             // ── Her ilan için: detay sayfasına gir → siteye kaydet ─────────
             const listSayfasi = nextUrl || job.url; // detaylar arası dönülecek sayfa
-            let botBan = false;
             let detailCount = 0; // bu turda kaç detay açıldı
 
             for (let i = 0; i < yeniler.length; i++) {
-              if (shouldStop || botBan) break;
+              if (shouldStop || siteBanned) break;
               const ilan = yeniler[i];
               sendProgress(`${site} · ilan ${i + 1}/${yeniler.length}: ${ilan.baslik?.slice(0, 35)}...`);
 
@@ -643,15 +643,10 @@ async function _runAllScrapersInner(force = false) {
                   continue;
                 }
                 if (durum === 'bot_ban') {
-                  sendProgress(`⚠️ ${site} bot bloğu — 15dk bekleniyor...`, 'error');
+                  sendProgress(`⚠️ ${site} bot bloğu — site atlanıyor, diğer siteye geçiliyor`, 'error');
                   await logError(site, 'bot_block', `Detay sayfasında bot bloğu: ${ilan.kaynak_url}`);
-                  botBan = true;
-                  await sleep(15 * 60 * 1000);
-                  botBan = false;
-                  sendProgress(`${site}: bekleme bitti, devam ediliyor`);
-                  // Bu ilanı tekrar dene
-                  i--;
-                  continue;
+                  siteBanned = true;
+                  break;
                 }
 
                 const detail = await injectDetail(tabId, detailFn);
@@ -689,7 +684,7 @@ async function _runAllScrapersInner(force = false) {
                 await logError(site, 'webhook_error', `${ilan.kaynak_url} — ${err.message}`);
               }
 
-              if (shouldStop || botBan) break;
+              if (shouldStop || siteBanned) break;
 
               // ── Her 8 ilandan sonra büyük mola (sahibinden pattern kırmak için) ──
               if (detailCount > 0 && detailCount % 8 === 0) {
@@ -700,7 +695,7 @@ async function _runAllScrapersInner(force = false) {
               }
 
               // ── Detaylar arası: liste sayfasına dön, bekle ──
-              if (!shouldStop && !botBan && i < yeniler.length - 1) {
+              if (!shouldStop && !siteBanned && i < yeniler.length - 1) {
                 const bekle = 90000 + Math.random() * 60000; // 1.5-2.5 dakika
                 sendProgress(`${site}: liste sayfasına dönüyor, ${Math.round(bekle/1000)}sn sonra devam...`);
                 await navigateTab(tabId, listSayfasi);
