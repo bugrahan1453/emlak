@@ -274,7 +274,7 @@ async function fetchIlanIcerik(url) {
       'Cache-Control':   'no-cache',
       'Referer':         'https://www.sahibinden.com/',
     },
-    credentials: 'omit',
+    credentials: 'include',
   });
 
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -456,31 +456,23 @@ async function handleMesaj(msg, sender) {
       return { tamam: true, eklenen: toplamEklenen };
     }
 
-    // Popup: URL gir → liste sayfasını fetch et → linkleri kuyruğa ekle
+    // Popup: URL gir → o sayfayı tab'da aç → content script linkleri toplar → tab kapanır
     case 'LISTE_URL_EKLE': {
       const hedefUrl = msg.url;
       if (!hedefUrl?.includes('sahibinden.com')) return { tamam: false, mesaj: 'Geçersiz URL' };
-      try {
-        const res = await fetch(hedefUrl, {
-          headers: { 'Accept': 'text/html', 'Accept-Language': 'tr-TR,tr;q=0.9', 'Referer': 'https://www.sahibinden.com/' },
-          credentials: 'omit',
+      return new Promise(resolve => {
+        chrome.tabs.create({ url: hedefUrl, active: false }, tab => {
+          const tid = tab.id;
+          chrome.tabs.onUpdated.addListener(function dinle(tabId, info) {
+            if (tabId !== tid || info.status !== 'complete') return;
+            chrome.tabs.onUpdated.removeListener(dinle);
+            // Content script LISTE_KUYRUGA_EKLE mesajını gönderecek, sonra tab'ı kapat
+            setTimeout(() => chrome.tabs.remove(tid).catch(() => {}), 2500);
+            resolve({ tamam: true, eklenen: '?' });
+          });
+          setTimeout(() => { chrome.tabs.remove(tid).catch(() => {}); resolve({ tamam: true, eklenen: '?' }); }, 15000);
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const html = await res.text();
-        // İlan linklerini regex ile çıkar
-        const ilanUrls = [];
-        const linkRegex = /href="(\/ilan\/[^"?]+)"/gi;
-        let lm;
-        while ((lm = linkRegex.exec(html)) !== null) {
-          const tam = 'https://www.sahibinden.com' + lm[1];
-          if (!ilanUrls.includes(tam)) ilanUrls.push(tam);
-        }
-        const eklenen = await kuyruğaEkle(ilanUrls);
-        return { tamam: true, eklenen };
-      } catch (e) {
-        await log(`Liste fetch hatası: ${e.message}`, 'hata');
-        return { tamam: false, mesaj: e.message };
-      }
+      });
     }
 
     // Content script: liste sayfasındaki URL'leri kuyruğa ekle

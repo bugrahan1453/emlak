@@ -111,12 +111,12 @@ els.btnUrlEkle.addEventListener('click', async () => {
   // Background'a gönder — liste sayfasını fetch edip URL'leri toplar
   const r = await chrome.runtime.sendMessage({ tip: 'LISTE_URL_EKLE', url });
   if (r?.tamam) {
-    urlMesajGoster(`✅ ${r.eklenen} ilan kuyruğa eklendi`, '#68d391');
+    urlMesajGoster('✅ Sayfa açılıyor, ilanlar kuyruğa ekleniyor...', '#68d391');
   } else {
     urlMesajGoster('⚠ ' + (r?.mesaj || 'Hata'), '#fc8181');
   }
   els.urlInput.value = '';
-  setTimeout(durumGuncelle, 1000);
+  setTimeout(durumGuncelle, 3000);
 });
 
 function urlMesajGoster(metin, renk) {
