@@ -6,7 +6,8 @@
   "permissions": ["storage", "notifications", "alarms", "tabs"],
   "host_permissions": [
     "https://www.sahibinden.com/*",
-    "https://api.openai.com/*"
+    "https://api.openai.com/*",
+    "https://hetagayrimenkul.com/*"
   ],
   "action": {
     "default_popup": "popup/popup.html",
