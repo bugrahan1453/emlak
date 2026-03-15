@@ -18,8 +18,8 @@ async function yukle() {
   const cfg = await chrome.storage.local.get({
     openaiApiKey:  '',
     gptModel:      'gpt-4o-mini',
-    webhookUrl:    '',
-    webhookSecret: '',
+    webhookUrl:    'https://hetagayrimenkul.com/api/webhook.php',
+    webhookSecret: 'HetagScraper2024!xK9mPqR7wZn',
     otoMod:        true,
     delaySaniye:   300,
   });
