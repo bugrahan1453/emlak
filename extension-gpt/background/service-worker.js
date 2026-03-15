@@ -78,20 +78,28 @@ Kurallar:
 
   const kullanici = `Sayfa URL: ${sayfaUrl}\n\n${sayfaMetni.slice(0, 6000)}`;
 
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type':  'application/json',
-      'Authorization': `Bearer ${cfg.openaiApiKey}`,
-    },
-    body: JSON.stringify({
-      model:           cfg.gptModel || 'gpt-4o-mini',
-      messages:        [{ role: 'system', content: sistem }, { role: 'user', content: kullanici }],
-      response_format: { type: 'json_object' },
-      max_tokens:      800,
-      temperature:     0,
-    }),
-  });
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 45000); // 45sn timeout
+  let res;
+  try {
+    res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${cfg.openaiApiKey}`,
+      },
+      body: JSON.stringify({
+        model:           cfg.gptModel || 'gpt-4o-mini',
+        messages:        [{ role: 'system', content: sistem }, { role: 'user', content: kullanici }],
+        response_format: { type: 'json_object' },
+        max_tokens:      800,
+        temperature:     0,
+      }),
+      signal: ctrl.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (!res.ok) {
     const hata = await res.text().catch(() => '');
@@ -135,20 +143,28 @@ Kurallar:
 
   const kullanici = `Sayfa: ${sayfaUrl}\n\nİlanlar:\n${JSON.stringify(ilanlar, null, 1).slice(0, 7000)}`;
 
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type':  'application/json',
-      'Authorization': `Bearer ${cfg.openaiApiKey}`,
-    },
-    body: JSON.stringify({
-      model:           cfg.gptModel || 'gpt-4o-mini',
-      messages:        [{ role: 'system', content: sistem }, { role: 'user', content: kullanici }],
-      response_format: { type: 'json_object' },
-      max_tokens:      3000,
-      temperature:     0,
-    }),
-  });
+  const ctrl2 = new AbortController();
+  const timer2 = setTimeout(() => ctrl2.abort(), 60000); // 60sn timeout (batch daha büyük)
+  let res;
+  try {
+    res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${cfg.openaiApiKey}`,
+      },
+      body: JSON.stringify({
+        model:           cfg.gptModel || 'gpt-4o-mini',
+        messages:        [{ role: 'system', content: sistem }, { role: 'user', content: kullanici }],
+        response_format: { type: 'json_object' },
+        max_tokens:      3000,
+        temperature:     0,
+      }),
+      signal: ctrl2.signal,
+    });
+  } finally {
+    clearTimeout(timer2);
+  }
 
   if (!res.ok) {
     const hata = await res.text().catch(() => '');
