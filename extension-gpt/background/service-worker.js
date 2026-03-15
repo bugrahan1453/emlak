@@ -159,7 +159,10 @@ Kurallar:
   const icerik = json.choices?.[0]?.message?.content || '{}';
   const parsed = JSON.parse(icerik);
   // GPT bazen { ilanlar: [...] } veya direkt [...] döner
-  return Array.isArray(parsed) ? parsed : (parsed.ilanlar || parsed.data || []);
+  if (Array.isArray(parsed)) return parsed;
+  // json_object formatında key farklı olabilir — tüm değerler arasında ilk array'i bul
+  const ilkArray = Object.values(parsed).find(v => Array.isArray(v));
+  return ilkArray || [];
 }
 
 // ─── Webhook'a Gönder ────────────────────────────────────────────────────────
@@ -295,17 +298,65 @@ async function fetchIlanIcerik(url) {
     .slice(0, 7000);
 
   // Fotoğraf URL'lerini HTML'den regex ile çıkar
-  const fotoRegex = /(?:data-src|data-lazy|src)="(https:\/\/[^"]*(?:sahibinden|cdn)[^"]*\.(?:jpg|jpeg|png|webp)(?:\?[^"]*)?)"/gi;
+  // sahibinden CDN: i0.shbdn.com, i1.shbdn.com, dsmcdn.com vb.
+  const fotoRegex = /(?:data-src|data-lazy|data-lazy-src|data-original|content|src)="(https:\/\/[^"]*(?:shbdn|sahibinden|dsmcdn|emlakjet|hurriyetemlak|cdn)[^"]*\.(?:jpg|jpeg|png|webp)(?:\?[^"]*)?)"/gi;
   const fotograflar = [];
   let m;
   while ((m = fotoRegex.exec(html)) !== null) {
     const src = m[1];
-    if (!src.includes('placeholder') && !src.includes('no-image') && !src.includes('sprite')) {
+    if (!src.includes('placeholder') && !src.includes('no-image') &&
+        !src.includes('sprite') && !src.includes('logo') &&
+        !src.includes('icon') && !src.includes('avatar')) {
       fotograflar.push(src);
     }
   }
 
-  return { metin, fotograflar: [...new Set(fotograflar)].slice(0, 15) };
+  return { metin, fotograflar: [...new Set(fotograflar)].slice(0, 20) };
+}
+
+// ─── Sahibinden Liste Sayfasından İlan URL'lerini Çıkar ──────────────────────
+function sahibindenIlanUrlleriniCikar(html) {
+  const regex = /href="(\/ilan\/[^"?#]+)"/g;
+  const urls = new Set();
+  let m;
+  while ((m = regex.exec(html)) !== null) {
+    const path = m[1];
+    if (path.startsWith('/ilan/')) {
+      urls.add('https://www.sahibinden.com' + path);
+    }
+  }
+  return [...urls];
+}
+
+// ─── Çoklu Sayfa Fetch: pagingOffset ile sayfaları çek ───────────────────────
+async function sahibindenCokluSayfaFetch(sayfaUrl, sayfaSayisi) {
+  const tumUrller = [];
+
+  for (let i = 0; i < sayfaSayisi; i++) {
+    try {
+      const u = new URL(sayfaUrl);
+      u.searchParams.set('pagingOffset', i * 20);
+      const res = await fetch(u.toString(), {
+        headers: {
+          'Accept':          'text/html,application/xhtml+xml',
+          'Accept-Language': 'tr-TR,tr;q=0.9',
+          'Referer':         'https://www.sahibinden.com/',
+        },
+        credentials: 'include',
+      });
+      if (!res.ok) break;
+      const html = await res.text();
+      const urls = sahibindenIlanUrlleriniCikar(html);
+      if (urls.length === 0) break; // Son sayfa
+      tumUrller.push(...urls);
+      await log(`Sayfa ${i + 1}: ${urls.length} ilan bulundu`, 'info');
+    } catch (e) {
+      await log(`Sayfa ${i + 1} fetch hatası: ${e.message}`, 'hata');
+      break;
+    }
+  }
+
+  return [...new Set(tumUrller)];
 }
 
 // ─── Kuyruk İşleme (fetch tabanlı, sekme açmaz) ───────────────────────────────
@@ -423,6 +474,7 @@ async function handleMesaj(msg, sender) {
 
         try {
           const islenmis = await gptListeIsleBatch(batch, msg.sayfaUrl, cfg);
+          await log(`GPT batch ${Math.floor(i/BATCH)+1}: ${islenmis.length} ilan döndü`, 'info');
           for (const ilan of islenmis) {
             if (!ilan.baslik || !ilan.kaynak_url) continue;
             const tamVeri = {
@@ -434,7 +486,9 @@ async function handleMesaj(msg, sender) {
             try {
               const sonuc   = await webhookGonder(tamVeri, cfg);
               const eklendi = sonuc?.data?.eklenen ?? sonuc?.eklenen ?? 0;
+              const atilan  = sonuc?.data?.atilan  ?? sonuc?.atilan  ?? 0;
               if (eklendi > 0) toplamEklenen++;
+              else await log(`Mükerrer (atilan=${atilan}): ${ilan.baslik?.slice(0, 40)}`, 'info');
               await islendiIsaretle(ilan.kaynak_url);
             } catch (wErr) {
               await log(`Webhook hatası: ${wErr.message}`, 'hata');
@@ -454,6 +508,25 @@ async function handleMesaj(msg, sender) {
         });
       }
       return { tamam: true, eklenen: toplamEklenen };
+    }
+
+    // Content script: liste sayfasından URL'leri topla + 5 sayfa tara → kuyruğa ekle
+    case 'COKLU_SAYFA_KUYRUK': {
+      const mevcutUrller = msg.ilanUrls || [];
+      const sayfaUrl     = msg.sayfaUrl || '';
+      if (!sayfaUrl) return { tamam: false };
+
+      await log(`Çoklu sayfa taranıyor: ${sayfaUrl.split('?')[0]}`, 'info');
+
+      // 5 sayfa fetch et (pagingOffset 0,20,40,60,80)
+      const tumUrller = await sahibindenCokluSayfaFetch(sayfaUrl, 5);
+
+      // Mevcut sayfadan gelen URL'leri de ekle (union)
+      const hepsi = [...new Set([...mevcutUrller, ...tumUrller])];
+
+      const eklenen = await kuyruğaEkle(hepsi);
+      await log(`✅ Toplam ${hepsi.length} URL kuyruğa eklendi (${eklenen} yeni)`, 'ok');
+      return { tamam: true, eklenen };
     }
 
     // Popup: URL gir → o sayfayı tab'da aç → content script linkleri toplar → tab kapanır
