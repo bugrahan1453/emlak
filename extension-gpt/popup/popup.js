@@ -12,6 +12,9 @@ const els = {
   btnDurdur:   document.getElementById('btn-durdur'),
   btnTemizle:  document.getElementById('btn-temizle'),
   ayarlarLink: document.getElementById('ayarlar-link'),
+  urlInput:    document.getElementById('url-input'),
+  btnUrlEkle:  document.getElementById('btn-url-ekle'),
+  urlMesaj:    document.getElementById('url-mesaj'),
 };
 
 // ─── Durum Güncelle ──────────────────────────────────────────────────────────
@@ -96,6 +99,36 @@ els.ayarlarLink.addEventListener('click', e => {
   e.preventDefault();
   chrome.runtime.openOptionsPage();
 });
+
+// ─── URL Ekle ────────────────────────────────────────────────────────────────
+els.btnUrlEkle.addEventListener('click', async () => {
+  const url = els.urlInput.value.trim();
+  if (!url || !url.includes('sahibinden.com')) {
+    urlMesajGoster('⚠ Geçerli bir sahibinden.com URL\'si girin', '#fc8181');
+    return;
+  }
+
+  // Arka planda sekme aç → content script URL'leri kuyruğa ekler
+  const tab = await chrome.tabs.create({ url, active: false });
+
+  // Sekme yüklenince kapat (content script zaten mesajı gönderdi)
+  chrome.tabs.onUpdated.addListener(function dinle(tabId, info) {
+    if (tabId !== tab.id || info.status !== 'complete') return;
+    chrome.tabs.onUpdated.removeListener(dinle);
+    setTimeout(() => chrome.tabs.remove(tab.id).catch(() => {}), 3000);
+  });
+
+  urlMesajGoster('✅ URL açılıyor, ilanlar kuyruğa ekleniyor...', '#68d391');
+  els.urlInput.value = '';
+  setTimeout(durumGuncelle, 4000);
+});
+
+function urlMesajGoster(metin, renk) {
+  els.urlMesaj.textContent = metin;
+  els.urlMesaj.style.color = renk;
+  els.urlMesaj.style.display = 'block';
+  setTimeout(() => { els.urlMesaj.style.display = 'none'; }, 5000);
+}
 
 // ─── İlk Yükleme + Otomatik Yenileme ────────────────────────────────────────
 durumGuncelle();
