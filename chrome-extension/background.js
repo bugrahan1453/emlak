@@ -77,28 +77,36 @@ async function ensureAlarms() {
 }
 ensureAlarms();
 
+// ─── Rastgele Gecikmeli Tek Seferlik Alarm Planlama ───────────────────────────
+async function scheduleNextScrape() {
+  const cfg = await getConfig();
+  const base   = cfg.intervalMinutes || 10;
+  const jitter = Math.floor(Math.random() * 6) - 2; // -2 ile +3 arası
+  const delay  = Math.max(1, base + jitter);
+  await chrome.alarms.clearAll();
+  chrome.alarms.create('scrape', { delayInMinutes: delay });
+  // Oturum kontrol alarmı (2 dakikada bir cf_clearance kontrolü)
+  const sessionAlarm = await chrome.alarms.get('session_check');
+  if (!sessionAlarm) chrome.alarms.create('session_check', { periodInMinutes: 2 });
+}
+
 // ─── Alarm Kurulumu ───────────────────────────────────────────────────────────
 chrome.runtime.onInstalled.addListener(async (details) => {
   console.log('[EmlakRadar] Extension yüklendi');
 
-  // İlk kurulumda ayarları kaydet ve hemen başlat
   if (details.reason === 'install') {
     await chrome.storage.sync.set({ cities: DEFAULT_CITIES, intervalMinutes: 10, enabled: true });
-    chrome.alarms.create('scrape', { delayInMinutes: 2, periodInMinutes: 10 });
-    // İlk kurulumda bot algısını tetiklememek için 2 dakika bekle
+    chrome.alarms.create('scrape', { delayInMinutes: 2 });
+    chrome.alarms.create('session_check', { periodInMinutes: 2 });
     setTimeout(() => runAllScrapers(true), 2 * 60 * 1000);
   } else {
-    const cfg = await getConfig();
-    chrome.alarms.create('scrape', { delayInMinutes: 1, periodInMinutes: cfg.intervalMinutes || 10 });
+    await scheduleNextScrape();
   }
 });
 
 chrome.storage.onChanged.addListener(async (changes) => {
   if (changes.intervalMinutes) {
-    const minutes = changes.intervalMinutes.newValue || 10;
-    await chrome.alarms.clearAll();
-    chrome.alarms.create('scrape', { delayInMinutes: 1, periodInMinutes: minutes });
-    ensureAlarms();
+    await scheduleNextScrape();
   }
 });
 
@@ -138,6 +146,22 @@ chrome.cookies.onChanged.addListener((changeInfo) => {
 
 chrome.alarms.onAlarm.addListener(async alarm => {
   if (alarm.name === 'scrape') await runAllScrapers();
+  if (alarm.name === 'session_check') {
+    // cf_clearance kalan süresi < 5 dakika ise bildirim gönder
+    const cfCookie = await chrome.cookies.get({ url: 'https://www.sahibinden.com', name: 'cf_clearance' }).catch(() => null);
+    if (cfCookie?.expirationDate) {
+      const kalanMs = cfCookie.expirationDate * 1000 - Date.now();
+      if (kalanMs > 0 && kalanMs < 5 * 60 * 1000) {
+        chrome.notifications.create('session_warn_' + Date.now(), {
+          type: 'basic', iconUrl: 'icons/icon48.png',
+          title: 'EmlakRadar — Oturum Bitmek Üzere',
+          message: `Sahibinden oturumu ${Math.ceil(kalanMs/60000)} dakika içinde sona erer. Siteyi ziyaret edin.`,
+          priority: 1,
+        });
+        sendProgress(`⚠️ Sahibinden oturumu ${Math.ceil(kalanMs/60000)}dk içinde bitiyor — siteyi ziyaret edin`, 'error');
+      }
+    }
+  }
 });
 
 // ─── Popup Mesajları ──────────────────────────────────────────────────────────
@@ -279,16 +303,18 @@ async function checkBotBlock(tabId) {
     }
 
     if (st.challenge) {
-      sendProgress('Challenge sayfası — çözüm deneniyor...', 'info');
+      sendProgress('Challenge sayfası tespit edildi — CAPTCHA çözücü deneniyor...', 'info');
       const cfg = await getConfig();
       if (cfg.captchaSolver && cfg.captchaApiKey) {
         const solved = await trySolveCaptcha(tabId, cfg);
         if (solved) { sendProgress('✓ CAPTCHA çözüldü, devam ediliyor', 'ok'); return false; }
       }
-      const debugSolved = await trySolveChallenge(tabId);
-      if (debugSolved) { sendProgress('✓ Challenge geçildi', 'ok'); return false; }
+      // Cloudflare JS challenge'i birkaç saniye bekleyince otomatik geçer — tekrar dene
+      await sleep(5000 + Math.random() * 3000);
+      const halaVarMi = await checkBotBlockSimple(tabId);
+      if (!halaVarMi) { sendProgress('✓ Challenge otomatik geçildi', 'ok'); return false; }
 
-      sendProgress('⚠️ Challenge geçilemedi — ban olarak işleniyor', 'error');
+      sendProgress('⚠️ Challenge geçilemedi — kullanıcı müdahalesi gerekli', 'error');
       chrome.notifications.create('challenge_failed_' + Date.now(), {
         type: 'basic', iconUrl: 'icons/icon48.png',
         title: 'EmlakRadar — Challenge Geçilemedi',
@@ -302,30 +328,70 @@ async function checkBotBlock(tabId) {
   } catch (_) { return false; }
 }
 
-// ─── CAPTCHA Tespiti ──────────────────────────────────────────────────────────
+// ─── CAPTCHA Tespiti (6 yöntem) ───────────────────────────────────────────────
 async function detectCaptcha(tabId) {
   try {
     const r = await chrome.scripting.executeScript({
       target: { tabId },
       func: () => {
         const out = { hasCaptcha: false, type: null, sitekey: null, pageUrl: location.href };
+
+        // ── Turnstile tespiti ─────────────────────────────────────────────────
         const turnstile = document.querySelector(
           'iframe[src*="challenges.cloudflare.com"], [class*="cf-turnstile"], #cf-turnstile-response, [data-turnstile-sitekey]'
         );
         if (turnstile) {
           out.hasCaptcha = true; out.type = 'turnstile';
+
+          // Yöntem 1: data-sitekey attribute
           const w = document.querySelector('[data-sitekey], [data-turnstile-sitekey]');
           if (w) out.sitekey = w.getAttribute('data-sitekey') || w.getAttribute('data-turnstile-sitekey');
+
+          // Yöntem 2: Sayfa HTML'inde regex
           if (!out.sitekey) {
             const m = document.documentElement.innerHTML.match(/sitekey['":\s]+['"]([0-9a-zA-Z_\-\.]{10,})['"]/);
             if (m) out.sitekey = m[1];
           }
+
+          // Yöntem 3: Script tag içerikleri
+          if (!out.sitekey) {
+            const scripts = Array.from(document.querySelectorAll('script'));
+            for (const s of scripts) {
+              const m = (s.textContent || '').match(/sitekey['":\s]+['"]([0-9a-zA-Z_\-\.]{10,})['"]/);
+              if (m) { out.sitekey = m[1]; break; }
+            }
+          }
+
+          // Yöntem 4: Cloudflare iframe src parametresi
+          if (!out.sitekey) {
+            const iframe = document.querySelector('iframe[src*="challenges.cloudflare.com"]');
+            if (iframe?.src) {
+              try {
+                const u = new URL(iframe.src);
+                out.sitekey = u.searchParams.get('k') || u.searchParams.get('sitekey') || null;
+              } catch (_) {}
+            }
+          }
+
+          // Yöntem 5: turnstile.render() çağrısı
+          if (!out.sitekey) {
+            const allText = Array.from(document.querySelectorAll('script')).map(s => s.textContent).join('');
+            const m = allText.match(/turnstile\.render\s*\(\s*\{[^}]*sitekey['":\s]+['"]([^'"]+)['"]/);
+            if (m) out.sitekey = m[1];
+          }
+
           return out;
         }
+
+        // ── CF Challenge (Turnstile değil) ────────────────────────────────────
         const txt = (document.body?.innerText || '').toLowerCase();
         if (txt.includes('tarayıcınızı kontrol') || txt.includes('checking your browser') || txt.includes('just a moment')) {
-          out.hasCaptcha = true; out.type = 'cf_challenge'; return out;
+          out.hasCaptcha = true; out.type = 'cf_challenge';
+          // Yöntem 6: Sitekey olmadan gönderilecek — AntiCloudflareTask
+          return out;
         }
+
+        // ── reCAPTCHA v2 ──────────────────────────────────────────────────────
         const re = document.querySelector('iframe[src*="google.com/recaptcha"], .g-recaptcha, #g-recaptcha-response');
         if (re) {
           out.hasCaptcha = true; out.type = 'recaptcha_v2';
@@ -333,6 +399,7 @@ async function detectCaptcha(tabId) {
           if (w2) out.sitekey = w2.getAttribute('data-sitekey');
           return out;
         }
+
         return out;
       },
     });
@@ -340,25 +407,57 @@ async function detectCaptcha(tabId) {
   } catch (_) { return { hasCaptcha: false }; }
 }
 
-// ─── CAPTCHA Çözme API ────────────────────────────────────────────────────────
+// ─── CAPTCHA Çözme API (gelişmiş hata yönetimi) ───────────────────────────────
 async function solveCaptchaViaAPI(captchaInfo, cfg) {
   const { type, sitekey, pageUrl } = captchaInfo;
   const api = CAPTCHA_APIS[cfg.captchaSolver];
   if (!api) return null;
 
+  // Görev tipini CAPTCHA türüne göre seç
   let taskData;
-  if (type === 'turnstile')    taskData = { type: 'TurnstileTaskProxyless',   websiteURL: pageUrl, websiteKey: sitekey };
-  else if (type === 'recaptcha_v2') taskData = { type: 'RecaptchaV2TaskProxyless', websiteURL: pageUrl, websiteKey: sitekey };
-  else if (type === 'cf_challenge') taskData = { type: 'AntiCloudflareTask', websiteURL: pageUrl, metadata: { type: 'challenge' } };
-  else return null;
+  if (type === 'turnstile' && sitekey) {
+    taskData = { type: 'TurnstileTaskProxyless', websiteURL: pageUrl, websiteKey: sitekey };
+  } else if (type === 'turnstile') {
+    // Sitekey bulunamadı — AntiCloudflare ile dene
+    if (cfg.captchaSolver === 'capmonster') {
+      taskData = { type: 'AntiCloudflareTask', websiteURL: pageUrl, metadata: { type: 'turnstile' } };
+    } else {
+      taskData = { type: 'AntiCloudflareTask', websiteURL: pageUrl, cloudflareTaskType: 'turnstile' };
+    }
+  } else if (type === 'recaptcha_v2') {
+    taskData = { type: 'RecaptchaV2TaskProxyless', websiteURL: pageUrl, websiteKey: sitekey };
+  } else if (type === 'cf_challenge') {
+    taskData = { type: 'AntiCloudflareTask', websiteURL: pageUrl, metadata: { type: 'challenge' } };
+  } else return null;
 
   try {
-    const createRes = await fetch(api.create, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ clientKey: cfg.captchaApiKey, task: taskData }),
-    });
-    const created = await createRes.json();
-    if (created.errorId) { console.warn('[EmlakRadar] CAPTCHA task hatası:', created.errorDescription); return null; }
+    let createRes, created;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      createRes = await fetch(api.create, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientKey: cfg.captchaApiKey, task: taskData }),
+      });
+      created = await createRes.json();
+      if (created.errorDescription?.includes('SLOT')) {
+        await sleep(10000); continue; // Slot yok — bekle tekrar dene
+      }
+      break;
+    }
+    if (!created) return null;
+    if (created.errorId) {
+      const desc = created.errorDescription || '';
+      if (desc.includes('BALANCE') || desc.includes('balance')) {
+        sendProgress('⚠️ CAPTCHA bakiyesi bitti! API hesabını kontrol edin.', 'error');
+        chrome.notifications.create('captcha_balance_' + Date.now(), {
+          type: 'basic', iconUrl: 'icons/icon48.png',
+          title: 'EmlakRadar — CAPTCHA Bakiyesi Bitti',
+          message: `${cfg.captchaSolver} hesabınızdaki bakiye tükendi. Bakiye yükleyin.`,
+          priority: 2,
+        });
+      }
+      console.warn('[EmlakRadar] CAPTCHA task hatası:', desc);
+      return null;
+    }
     const taskId = created.taskId;
     if (!taskId) return null;
 
@@ -371,7 +470,13 @@ async function solveCaptchaViaAPI(captchaInfo, cfg) {
       });
       const data = await res.json();
       if (data.status === 'ready') return data.solution;
-      if (data.errorId) { console.warn('[EmlakRadar] CAPTCHA çözüm hatası:', data.errorDescription); return null; }
+      if (data.errorId) {
+        const errDesc = data.errorDescription || '';
+        if (errDesc.includes('UNSOLVABLE') || errDesc.includes('WRONG_KEY')) {
+          console.warn('[EmlakRadar] CAPTCHA çözülemedi:', errDesc);
+          return null;
+        }
+      }
     }
     return null;
   } catch (e) { console.error('[EmlakRadar] CAPTCHA API hatası:', e.message); return null; }
@@ -408,43 +513,17 @@ async function trySolveCaptcha(tabId, cfg) {
   if (!sol) return false;
   await injectCaptchaSolution(tabId, info.type, sol);
   await sleep(5000 + Math.random() * 3000);
+
+  // cf_clearance cookie kontrolü
+  const cfCookie = await chrome.cookies.get({ url: info.pageUrl, name: 'cf_clearance' }).catch(() => null);
+  if (cfCookie) {
+    const captchaCount = ((await chrome.storage.local.get(['captchaCount'])).captchaCount || 0) + 1;
+    await chrome.storage.local.set({ captchaCount });
+    return true;
+  }
   const captchaCount = ((await chrome.storage.local.get(['captchaCount'])).captchaCount || 0) + 1;
   await chrome.storage.local.set({ captchaCount });
   return !await checkBotBlockSimple(tabId);
-}
-
-// ─── Challenge Sayfası Geçme (API yoksa — dispatchEvent yöntemi) ───────────────
-async function trySolveChallenge(tabId) {
-  try {
-    await sleep(3000 + Math.random() * 2000);
-    const r = await chrome.scripting.executeScript({
-      target: { tabId }, world: 'MAIN',
-      func: async () => {
-        for (let i = 0; i < 15; i++) {
-          window.dispatchEvent(new MouseEvent('mousemove', {
-            clientX: 100 + Math.random() * 800 + i * 20,
-            clientY: 150 + Math.random() * 400 + i * 8,
-            movementX: Math.random() * 10 - 5, movementY: Math.random() * 8 - 4,
-            bubbles: true,
-          }));
-          await new Promise(rr => setTimeout(rr, 100 + Math.random() * 300));
-        }
-        const btns = [...document.querySelectorAll('button, input[type="button"], input[type="submit"], [role="button"]')];
-        const btn = btns.find(b => /devam|continue|verify|doğrula|ileri/i.test(b.textContent + b.value + (b.getAttribute('aria-label') || '')));
-        if (!btn) return false;
-        btn.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
-        await new Promise(rr => setTimeout(rr, 300 + Math.random() * 400));
-        btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
-        await new Promise(rr => setTimeout(rr, 80 + Math.random() * 120));
-        btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }));
-        btn.click();
-        return true;
-      },
-    }).catch(() => [{ result: false }]);
-    if (!r?.[0]?.result) return false;
-    await sleep(5000 + Math.random() * 3000);
-    return !await checkBotBlockSimple(tabId);
-  } catch (_) { return false; }
 }
 
 // ─── Bildirimler ──────────────────────────────────────────────────────────────
@@ -458,10 +537,10 @@ async function notifyNewListings(site, count, city) {
   });
 }
 
-// ─── Hata Kaydı ───────────────────────────────────────────────────────────────
-async function logError(site, tip, mesaj) {
+// ─── Hata Kaydı (opsiyonel detay objesi ile) ──────────────────────────────────
+async function logError(site, tip, mesaj, detay = null) {
   const { errorLog = [] } = await chrome.storage.local.get(['errorLog']);
-  errorLog.unshift({ zaman: new Date().toISOString(), site, tip, mesaj });
+  errorLog.unshift({ zaman: new Date().toISOString(), site, tip, mesaj, ...(detay ? { detay } : {}) });
   if (errorLog.length > 50) errorLog.length = 50;
   await chrome.storage.local.set({ errorLog });
 }
@@ -531,7 +610,7 @@ async function _runAllScrapersInner(force = false) {
   console.log(`[EmlakRadar] Başladı — ${cities.join(', ')}`);
   sendProgress(`Başlıyor... ${cities.join(', ')}`);
 
-  const tab   = await createTab(jobs[0].url);
+  const tab   = await createTab('about:blank');
   const tabId = tab.id;
   await chrome.storage.local.set({ scrapeTabId: tabId });
   await setRandomViewport(tabId);
@@ -545,11 +624,23 @@ async function _runAllScrapersInner(force = false) {
       const detailFn = getDetailFn(site);
 
       // Sahibinden için oturum kontrolü
-    if (site === 'sahibinden') {
-      let ok = false;
-      try { ok = await checkSessionBeforeScrape(); } catch (e) { ok = true; } // crash = devam et
-      if (!ok) { sendProgress(`⚠️ Sahibinden atlandı — oturum yok`, 'error'); continue; }
-    }
+      if (site === 'sahibinden') {
+        let ok = false;
+        try { ok = await checkSessionBeforeScrape(); } catch (e) { ok = true; }
+        if (!ok) { sendProgress(`⚠️ Sahibinden atlandı — oturum yok`, 'error'); continue; }
+      }
+
+      // ── Referer zinciri: önce ana sayfa aç ────────────────────────────────
+      const homeUrls = { sahibinden: 'https://www.sahibinden.com', hepsiemlak: 'https://www.hepsiemlak.com', emlakjet: 'https://www.emlakjet.com' };
+      sendProgress(`${site}: ana sayfa açılıyor (referer zinciri)...`);
+      await navigateTab(tabId, homeUrls[site]);
+      await hideWebdriver(tabId);
+      await sleep(gaussianDelay(3000, 5000));
+      if (await checkBotBlock(tabId)) {
+        sendProgress(`⚠️ ${site} ana sayfa bot bloğu — site atlanıyor`, 'error');
+        await logError(site, 'bot_block_home', `Ana sayfa bot bloğu`, { url: homeUrls[site] });
+        continue;
+      }
 
     try {
         let siteBanned = false;
@@ -564,11 +655,14 @@ async function _runAllScrapersInner(force = false) {
             sendProgress(`${site} · ${job.kategori} · sayfa ${page} — liste tarıyor...`);
 
             await navigateTab(tabId, nextUrl);
+            await hideWebdriver(tabId);
+            // Cloudflare JS challenge 2-5sn içinde otomatik tamamlanır
+            await sleep(gaussianDelay(3500, 6000));
 
             if (await checkBotBlock(tabId)) {
               const botMsg = `Bot bloğu/Cloudflare — sayfa atlandı: ${nextUrl}`;
               sendProgress(`⚠️ ${site} bot bloğu — site atlanıyor, diğer siteye geçiliyor`, 'error');
-              await logError(site, 'bot_block_liste', botMsg);
+              await logError(site, 'bot_block_liste', botMsg, { url: nextUrl, sayfa: page });
               siteBanned = true; nextUrl = null; break;
             }
 
@@ -619,6 +713,9 @@ async function _runAllScrapersInner(force = false) {
 
               try {
                 await navigateTab(tabId, ilan.kaynak_url);
+                await hideWebdriver(tabId);
+                // Cloudflare challenge otomatik tamamlansın
+                await sleep(gaussianDelay(3000, 5500));
 
                 // 404 / süresi dolmuş ilan kontrolü — ban tetiklemez, atla
                 const pageState = await chrome.scripting.executeScript({
@@ -686,19 +783,30 @@ async function _runAllScrapersInner(force = false) {
 
               if (shouldStop || siteBanned) break;
 
-              // ── Her 8 ilandan sonra büyük mola (sahibinden pattern kırmak için) ──
+              // ── Her 8 ilandan sonra mola — daha doğal davranış ──
               if (detailCount > 0 && detailCount % 8 === 0) {
-                const molaSure = 240000 + Math.random() * 120000; // 4-6 dakika
-                sendProgress(`${site}: ${detailCount} ilan çekildi — ${Math.round(molaSure/60000)}dk mola (bot önleme)...`);
-                await navigateTab(tabId, site === 'sahibinden' ? 'https://www.sahibinden.com' : listSayfasi);
-                await sleep(molaSure);
+                const molaSure = 120000 + Math.random() * 120000; // 2-4 dakika
+                sendProgress(`${site}: ${detailCount} ilan çekildi — ${Math.round(molaSure/60000)}dk mola...`);
+                const r = Math.random();
+                if (r < 0.5) {
+                  // %50: goBack ile mevcut sayfada kal, scroll yap
+                  await goBackOrNavigate(tabId, listSayfasi);
+                  await sleep(molaSure);
+                } else if (r < 0.75) {
+                  // %25: Kategori sayfasına git
+                  await navigateTab(tabId, listSayfasi);
+                  await sleep(molaSure);
+                } else {
+                  // %25: Kısa mola (arka planda bekle)
+                  await sleep(molaSure / 2);
+                }
               }
 
-              // ── Detaylar arası: liste sayfasına dön, bekle ──
+              // ── Detaylar arası: goBack ile listeye dön ──
               if (!shouldStop && !siteBanned && i < yeniler.length - 1) {
                 const bekle = 90000 + Math.random() * 60000; // 1.5-2.5 dakika
-                sendProgress(`${site}: liste sayfasına dönüyor, ${Math.round(bekle/1000)}sn sonra devam...`);
-                await navigateTab(tabId, listSayfasi);
+                sendProgress(`${site}: listeye geri dönüyor (${Math.round(bekle/1000)}sn sonra devam)...`);
+                await goBackOrNavigate(tabId, listSayfasi);
                 await sleep(bekle);
               }
             }
@@ -733,6 +841,8 @@ async function _runAllScrapersInner(force = false) {
     const msg = shouldStop ? `Durduruldu — ${toplamYeni} ilan eklendi` : `Tamamlandı — ${toplamYeni} ilan eklendi`;
     sendProgress(msg, 'done');
     console.log(`[EmlakRadar] ${msg}`);
+    // Rastgele gecikmeli bir sonraki alarma planla
+    await scheduleNextScrape();
   }
 }
 
@@ -784,13 +894,18 @@ async function setRandomViewport(tabId) {
   } catch (_) {}
 }
 
-function createTab(url) {
+function createTab(url, timeoutMs = 45000) {
   return new Promise((resolve, reject) => {
-    chrome.tabs.create({ url, active: false }, tab => {
+    chrome.tabs.create({ url, active: true }, tab => {
       if (chrome.runtime.lastError) { reject(new Error(chrome.runtime.lastError.message)); return; }
+      const timer = setTimeout(() => {
+        chrome.tabs.onUpdated.removeListener(onUpdated);
+        resolve(tab); // Timeout = devam et
+      }, timeoutMs);
       function onUpdated(tabId, info) {
         if (tabId !== tab.id || info.status !== 'complete') return;
         chrome.tabs.onUpdated.removeListener(onUpdated);
+        clearTimeout(timer);
         resolve(tab);
       }
       chrome.tabs.onUpdated.addListener(onUpdated);
@@ -798,18 +913,65 @@ function createTab(url) {
   });
 }
 
-function navigateTab(tabId, url) {
+function navigateTab(tabId, url, timeoutMs = 45000) {
   return new Promise((resolve, reject) => {
     chrome.tabs.update(tabId, { url }, () => {
       if (chrome.runtime.lastError) { reject(new Error(chrome.runtime.lastError.message)); return; }
+      const timer = setTimeout(() => {
+        chrome.tabs.onUpdated.removeListener(onUpdated);
+        resolve(); // Timeout = devam et
+      }, timeoutMs);
       function onUpdated(updatedId, info) {
         if (updatedId !== tabId || info.status !== 'complete') return;
         chrome.tabs.onUpdated.removeListener(onUpdated);
+        clearTimeout(timer);
         resolve();
       }
       chrome.tabs.onUpdated.addListener(onUpdated);
     });
   });
+}
+
+// ─── navigator.webdriver Gizle (MAIN world) ───────────────────────────────────
+async function hideWebdriver(tabId) {
+  await chrome.scripting.executeScript({
+    target: { tabId }, world: 'MAIN',
+    func: () => {
+      try {
+        Object.defineProperty(navigator, 'webdriver', { get: () => undefined, configurable: true });
+      } catch (_) {}
+    },
+  }).catch(() => {});
+}
+
+// ─── Geri Git veya Navigasyon (goBack başarısızsa fallback) ──────────────────
+async function goBackOrNavigate(tabId, fallbackUrl) {
+  let resolved = false;
+  await Promise.race([
+    new Promise(resolve => {
+      chrome.tabs.goBack(tabId, () => {
+        if (chrome.runtime.lastError) { resolve(); return; }
+        // onUpdated veya 5 sn timeout bekle
+        const timer = setTimeout(() => {
+          chrome.tabs.onUpdated.removeListener(onUp);
+          resolve();
+        }, 5000);
+        function onUp(id, info) {
+          if (id !== tabId || info.status !== 'complete') return;
+          chrome.tabs.onUpdated.removeListener(onUp);
+          clearTimeout(timer);
+          resolved = true;
+          resolve();
+        }
+        chrome.tabs.onUpdated.addListener(onUp);
+      });
+    }),
+    sleep(8000),
+  ]);
+  // goBack başarısız olduysa (resolved=false ve hata) fallback
+  if (!resolved) {
+    try { await navigateTab(tabId, fallbackUrl); } catch (_) {}
+  }
 }
 
 function injectOnce(tabId, job) {
@@ -999,57 +1161,39 @@ async function checkServerIds(ilanlar) {
 // LİSTE CONTENT SCRIPTS — sadece mevcut sayfayı parse eder, nextUrl döner
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Tüm content script'lerin kullandığı gerçekçi scroll fonksiyonu
+// Tüm content script'lerin kullandığı gerçekçi scroll fonksiyonu (smooth + değişken adım)
 async function humanScroll() {
   const total  = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
-  const step   = () => 100 + Math.random() * 120;   // 100–220px her adım
-  const pause  = () => 60  + Math.random() * 100;   // 60–160ms normal bekleme
-  const longP  = () => 700 + Math.random() * 1200;  // 0.7–1.9s okuma molası
+  // Değişken adım boyutu: küçük/orta/büyük Gaussian dağılımı
+  const step   = () => {
+    const r = Math.random();
+    if (r < 0.2) return 50  + Math.random() * 50;   // %20: yavaş okuma
+    if (r < 0.8) return 100 + Math.random() * 150;  // %60: normal
+    return 250 + Math.random() * 150;                // %20: hızlı geçme
+  };
+  const pause  = () => 60  + Math.random() * 100;
+  const longP  = () => 700 + Math.random() * 1200;
   let pos = 0;
 
   while (pos < total - 200) {
     pos += step();
-    window.scrollTo(0, Math.min(pos, total));
-    if (Math.random() < 0.12) await new Promise(r => setTimeout(r, longP())); // okuma molası
+    window.scrollTo({ top: Math.min(pos, total), behavior: 'smooth' });
+    if (Math.random() < 0.12) await new Promise(r => setTimeout(r, longP()));
     else                       await new Promise(r => setTimeout(r, pause()));
-    // Zaman zaman biraz geri çekil (insan davranışı)
     if (Math.random() < 0.08) {
       pos -= 150 + Math.random() * 250;
-      window.scrollTo(0, Math.max(0, pos));
+      window.scrollTo({ top: Math.max(0, pos), behavior: 'smooth' });
       await new Promise(r => setTimeout(r, 300 + Math.random() * 400));
     }
   }
 
-  // En alta bak, sonra yukarı dön
   await new Promise(r => setTimeout(r, 400 + Math.random() * 600));
-  window.scrollTo(0, 0);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
   await new Promise(r => setTimeout(r, 300));
 }
 
 async function sahibindenScript(tip, kategori, city) {
   const BASE = 'https://www.sahibinden.com';
-
-  async function simulateMousePresence() {
-    await new Promise(r => setTimeout(r, 1000 + Math.random() * 1500));
-    const moves = 6 + Math.floor(Math.random() * 8);
-    for (let i = 0; i < moves; i++) {
-      window.dispatchEvent(new MouseEvent('mousemove', {
-        clientX: 100 + Math.random() * (window.innerWidth - 200),
-        clientY: 100 + Math.random() * (window.innerHeight - 200),
-        movementX: Math.random() * 12 - 6, movementY: Math.random() * 10 - 5, bubbles: true,
-      }));
-      await new Promise(r => setTimeout(r, 150 + Math.random() * 600));
-    }
-  }
-
-  async function occasionalKeyPress() {
-    if (Math.random() > 0.05) return;
-    const k = [{ key: 'Tab', code: 'Tab' }, { key: 'ArrowDown', code: 'ArrowDown' }, { key: 'Escape', code: 'Escape' }];
-    const chosen = k[Math.floor(Math.random() * k.length)];
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: chosen.key, code: chosen.code, bubbles: true }));
-    await new Promise(r => setTimeout(r, 60 + Math.random() * 100));
-    document.dispatchEvent(new KeyboardEvent('keyup', { key: chosen.key, code: chosen.code, bubbles: true }));
-  }
 
   async function waitFor(selector, ms = 30000) {
     const start = Date.now();
@@ -1060,13 +1204,21 @@ async function sahibindenScript(tip, kategori, city) {
     return false;
   }
 
-  async function quickScroll() {
+  async function humanScroll() {
     const total = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
-    for (let y = 0; y < total; y += 300) {
-      window.scrollTo(0, y);
-      await new Promise(r => setTimeout(r, 80));
+    const step  = () => { const r = Math.random(); return r < 0.2 ? 50 + r * 250 : r < 0.8 ? 100 + Math.random() * 150 : 250 + Math.random() * 150; };
+    const pause = () => 60 + Math.random() * 100;
+    const longP = () => 700 + Math.random() * 1200;
+    let pos = 0;
+    while (pos < total - 200) {
+      pos += step();
+      window.scrollTo({ top: Math.min(pos, total), behavior: 'smooth' });
+      if (Math.random() < 0.12) await new Promise(r => setTimeout(r, longP()));
+      else                       await new Promise(r => setTimeout(r, pause()));
+      if (Math.random() < 0.08) { pos -= 150 + Math.random() * 250; window.scrollTo({ top: Math.max(0, pos), behavior: 'smooth' }); await new Promise(r => setTimeout(r, 350)); }
     }
-    window.scrollTo(0, 0);
+    await new Promise(r => setTimeout(r, 500));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
     await new Promise(r => setTimeout(r, 300));
   }
 
@@ -1076,9 +1228,7 @@ async function sahibindenScript(tip, kategori, city) {
     return;
   }
 
-  await simulateMousePresence();
-  await occasionalKeyPress();
-  await quickScroll();
+  await humanScroll();
 
   const ilanlar = [];
   document.querySelectorAll('tr.searchResultsItem').forEach(satir => {
@@ -1145,17 +1295,20 @@ async function hepsiemlakScript(tip, kategori, city) {
 
   async function humanScroll() {
     const total = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
-    const step  = () => 100 + Math.random() * 120;
+    const step  = () => { const r = Math.random(); return r < 0.2 ? 50 + r * 250 : r < 0.8 ? 100 + Math.random() * 150 : 250 + Math.random() * 150; };
     const pause = () => 60  + Math.random() * 100;
     const longP = () => 700 + Math.random() * 1200;
     let pos = 0;
     while (pos < total - 200) {
-      pos += step(); window.scrollTo(0, Math.min(pos, total));
+      pos += step();
+      window.scrollTo({ top: Math.min(pos, total), behavior: 'smooth' });
       if (Math.random() < 0.12) await new Promise(r => setTimeout(r, longP()));
       else                       await new Promise(r => setTimeout(r, pause()));
-      if (Math.random() < 0.08) { pos -= 150 + Math.random() * 250; window.scrollTo(0, Math.max(0, pos)); await new Promise(r => setTimeout(r, 350)); }
+      if (Math.random() < 0.08) { pos -= 150 + Math.random() * 250; window.scrollTo({ top: Math.max(0, pos), behavior: 'smooth' }); await new Promise(r => setTimeout(r, 350)); }
     }
-    await new Promise(r => setTimeout(r, 500)); window.scrollTo(0, 0); await new Promise(r => setTimeout(r, 300));
+    await new Promise(r => setTimeout(r, 500));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    await new Promise(r => setTimeout(r, 300));
   }
 
   async function waitFor(selector, ms = 25000) {
@@ -1168,13 +1321,6 @@ async function hepsiemlakScript(tip, kategori, city) {
   }
 
   await waitFor(SEL);
-  // Mouse varlığı
-  (async () => {
-    for (let i = 0; i < 6; i++) {
-      window.dispatchEvent(new MouseEvent('mousemove', { clientX: 100 + Math.random() * 800, clientY: 100 + Math.random() * 500, bubbles: true }));
-      await new Promise(r => setTimeout(r, 200 + Math.random() * 500));
-    }
-  })();
   await humanScroll();
 
   const ilanlar = [];
@@ -1236,17 +1382,20 @@ async function emlakjetScript(tip, kategori, city) {
 
   async function humanScroll() {
     const total = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
-    const step  = () => 100 + Math.random() * 120;
+    const step  = () => { const r = Math.random(); return r < 0.2 ? 50 + r * 250 : r < 0.8 ? 100 + Math.random() * 150 : 250 + Math.random() * 150; };
     const pause = () => 60  + Math.random() * 100;
     const longP = () => 700 + Math.random() * 1200;
     let pos = 0;
     while (pos < total - 200) {
-      pos += step(); window.scrollTo(0, Math.min(pos, total));
+      pos += step();
+      window.scrollTo({ top: Math.min(pos, total), behavior: 'smooth' });
       if (Math.random() < 0.12) await new Promise(r => setTimeout(r, longP()));
       else                       await new Promise(r => setTimeout(r, pause()));
-      if (Math.random() < 0.08) { pos -= 150 + Math.random() * 250; window.scrollTo(0, Math.max(0, pos)); await new Promise(r => setTimeout(r, 350)); }
+      if (Math.random() < 0.08) { pos -= 150 + Math.random() * 250; window.scrollTo({ top: Math.max(0, pos), behavior: 'smooth' }); await new Promise(r => setTimeout(r, 350)); }
     }
-    await new Promise(r => setTimeout(r, 500)); window.scrollTo(0, 0); await new Promise(r => setTimeout(r, 300));
+    await new Promise(r => setTimeout(r, 500));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    await new Promise(r => setTimeout(r, 300));
   }
 
   async function waitFor(ms = 20000) {
@@ -1259,13 +1408,6 @@ async function emlakjetScript(tip, kategori, city) {
   }
 
   await waitFor();
-  // Mouse varlığı
-  (async () => {
-    for (let i = 0; i < 6; i++) {
-      window.dispatchEvent(new MouseEvent('mousemove', { clientX: 100 + Math.random() * 800, clientY: 100 + Math.random() * 500, bubbles: true }));
-      await new Promise(r => setTimeout(r, 200 + Math.random() * 500));
-    }
-  })();
   await humanScroll();
 
   const ilanlar = [];
@@ -1324,20 +1466,6 @@ async function emlakjetScript(tip, kategori, city) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function sahibindenDetailScript() {
-  // ─── Yardımcılar ────────────────────────────────────────────────────────────
-  async function simulateMousePresence() {
-    await new Promise(r => setTimeout(r, 800 + Math.random() * 1200));
-    const moves = 8 + Math.floor(Math.random() * 10);
-    for (let i = 0; i < moves; i++) {
-      window.dispatchEvent(new MouseEvent('mousemove', {
-        clientX: 80 + Math.random() * (window.innerWidth - 160),
-        clientY: 80 + Math.random() * (window.innerHeight - 160),
-        movementX: Math.random() * 14 - 7, movementY: Math.random() * 12 - 6, bubbles: true,
-      }));
-      await new Promise(r => setTimeout(r, 100 + Math.random() * 500));
-    }
-  }
-
   async function waitFor(selector, ms = 25000) {
     const start = Date.now();
     while (Date.now() - start < ms) {
@@ -1349,17 +1477,20 @@ async function sahibindenDetailScript() {
 
   async function humanScroll() {
     const total = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
-    const step  = () => 110 + Math.random() * 110;
+    const step  = () => { const r = Math.random(); return r < 0.2 ? 50 + r * 250 : r < 0.8 ? 100 + Math.random() * 150 : 250 + Math.random() * 150; };
     const pause = () => 70  + Math.random() * 100;
     const longP = () => 600 + Math.random() * 1000;
     let pos = 0;
     while (pos < total - 200) {
-      pos += step(); window.scrollTo(0, Math.min(pos, total));
+      pos += step();
+      window.scrollTo({ top: Math.min(pos, total), behavior: 'smooth' });
       if (Math.random() < 0.1) await new Promise(r => setTimeout(r, longP()));
       else                      await new Promise(r => setTimeout(r, pause()));
-      if (Math.random() < 0.07) { pos -= 150 + Math.random() * 200; window.scrollTo(0, Math.max(0, pos)); await new Promise(r => setTimeout(r, 300)); }
+      if (Math.random() < 0.07) { pos -= 150 + Math.random() * 200; window.scrollTo({ top: Math.max(0, pos), behavior: 'smooth' }); await new Promise(r => setTimeout(r, 300)); }
     }
-    await new Promise(r => setTimeout(r, 400)); window.scrollTo(0, 0); await new Promise(r => setTimeout(r, 200));
+    await new Promise(r => setTimeout(r, 400));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    await new Promise(r => setTimeout(r, 200));
   }
 
   // Thumbnail URL'ini tam boya çevir
@@ -1377,17 +1508,11 @@ async function sahibindenDetailScript() {
 
   // ─── Sayfa yüklensin ────────────────────────────────────────────────────────
   await waitFor('h1.classifiedDetailTitle, h1[class*="title"], .classifiedDetailMainPhoto', 25000);
-  await simulateMousePresence(); // Mouse varlığı oluştur
   await new Promise(r => setTimeout(r, 1500)); // JS render tamamlansın
 
-  // Lazy load tetiklemek için hızlı scroll (bot algısı için değil, sadece görüntü yükleme)
-  const pageH = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
-  for (let y = 0; y < pageH; y += 300) {
-    window.scrollTo(0, y);
-    await new Promise(r => setTimeout(r, 80));
-  }
-  window.scrollTo(0, 0);
-  await new Promise(r => setTimeout(r, 800)); // Lazy load tamamlansın
+  // Lazy load + gerçekçi scroll
+  await humanScroll();
+  await new Promise(r => setTimeout(r, 500)); // Lazy load tamamlansın
 
   // ─── 1. FOTOĞRAFLAR ──────────────────────────────────────────────────────────
   const seen = new Set();
@@ -1552,21 +1677,24 @@ async function hepsiemlakDetailScript() {
   }
   async function humanScroll() {
     const total = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+    const step  = () => { const r = Math.random(); return r < 0.2 ? 50 + r * 250 : r < 0.8 ? 100 + Math.random() * 150 : 250 + Math.random() * 150; };
     let pos = 0;
     while (pos < total - 200) {
-      pos += 110 + Math.random() * 110; window.scrollTo(0, Math.min(pos, total));
+      pos += step();
+      window.scrollTo({ top: Math.min(pos, total), behavior: 'smooth' });
       if (Math.random() < 0.1) await new Promise(r => setTimeout(r, 700 + Math.random() * 900));
       else                      await new Promise(r => setTimeout(r, 70 + Math.random() * 100));
+      if (Math.random() < 0.07) { pos -= 150 + Math.random() * 200; window.scrollTo({ top: Math.max(0, pos), behavior: 'smooth' }); await new Promise(r => setTimeout(r, 300)); }
     }
-    await new Promise(r => setTimeout(r, 400)); window.scrollTo(0, 0); await new Promise(r => setTimeout(r, 200));
+    await new Promise(r => setTimeout(r, 400));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    await new Promise(r => setTimeout(r, 200));
   }
 
   await waitFor();
   await new Promise(r => setTimeout(r, 1500));
-
-  const pageH2 = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
-  for (let y = 0; y < pageH2; y += 300) { window.scrollTo(0, y); await new Promise(r => setTimeout(r, 80)); }
-  window.scrollTo(0, 0); await new Promise(r => setTimeout(r, 800));
+  await humanScroll();
+  await new Promise(r => setTimeout(r, 500));
 
   // Açıklama
   const aciklama = (
@@ -1638,21 +1766,24 @@ async function emlakjetDetailScript() {
   }
   async function humanScroll() {
     const total = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+    const step  = () => { const r = Math.random(); return r < 0.2 ? 50 + r * 250 : r < 0.8 ? 100 + Math.random() * 150 : 250 + Math.random() * 150; };
     let pos = 0;
     while (pos < total - 200) {
-      pos += 110 + Math.random() * 110; window.scrollTo(0, Math.min(pos, total));
+      pos += step();
+      window.scrollTo({ top: Math.min(pos, total), behavior: 'smooth' });
       if (Math.random() < 0.1) await new Promise(r => setTimeout(r, 700 + Math.random() * 900));
       else                      await new Promise(r => setTimeout(r, 70 + Math.random() * 100));
+      if (Math.random() < 0.07) { pos -= 150 + Math.random() * 200; window.scrollTo({ top: Math.max(0, pos), behavior: 'smooth' }); await new Promise(r => setTimeout(r, 300)); }
     }
-    await new Promise(r => setTimeout(r, 400)); window.scrollTo(0, 0); await new Promise(r => setTimeout(r, 200));
+    await new Promise(r => setTimeout(r, 400));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    await new Promise(r => setTimeout(r, 200));
   }
 
   await waitFor();
   await new Promise(r => setTimeout(r, 1500));
-
-  const pageH3 = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
-  for (let y = 0; y < pageH3; y += 300) { window.scrollTo(0, y); await new Promise(r => setTimeout(r, 80)); }
-  window.scrollTo(0, 0); await new Promise(r => setTimeout(r, 800));
+  await humanScroll();
+  await new Promise(r => setTimeout(r, 500));
 
   const aciklama = (
     document.querySelector('#description, [id*="description"], [class*="description"]')?.textContent?.trim() || ''

@@ -36,14 +36,25 @@ function updateSiteStatus(data) {
     { key: 'emlakjet',   label: 'Emlakjet' },
   ];
   area.innerHTML = sites.map(s => {
-    let color = '#68d391'; let icon = '✅';
+    let color = '#68d391'; let icon = '✅'; let suffix = '';
     if (s.sessionKey) {
       const active = data[s.sessionKey];
       if (active === false) { color = '#fc8181'; icon = '⚠️'; }
-      else if (active === true) { color = '#68d391'; icon = '✅'; }
+      else if (active === true) {
+        color = '#68d391'; icon = '✅';
+        // cf_clearance kalan süre
+        if (data.sessionExpiry_sahibinden) {
+          const kalanMs = data.sessionExpiry_sahibinden - Date.now();
+          const kalanDk = Math.max(0, Math.floor(kalanMs / 60000));
+          if (kalanMs > 0) {
+            suffix = ` (${kalanDk}dk)`;
+            if (kalanDk < 10) color = '#f6ad55'; // Sarı uyarı
+          }
+        }
+      }
       else { color = '#718096'; icon = '❓'; }
     }
-    return `<span style="font-size:10px;color:${color};background:#1e2535;padding:2px 8px;border-radius:10px;">${icon} ${s.label}</span>`;
+    return `<span style="font-size:10px;color:${color};background:#1e2535;padding:2px 8px;border-radius:10px;">${icon} ${s.label}${suffix}</span>`;
   }).join('');
 
   // Session banner
@@ -67,7 +78,13 @@ function refreshStatus() {
     $('last-time').textContent  = formatTime(data.lastScrapeTime);
     $('last-count').textContent = data.lastScrapeCount != null ? String(data.lastScrapeCount) : '—';
     $('seen-count').textContent = data.seenCount != null ? String(data.seenCount) + ' ilan' : '—';
-    $('err-short').textContent  = data.lastError ? data.lastError.slice(0, 40) : '—';
+    $('captcha-stat').textContent = data.captchaCount > 0 ? String(data.captchaCount) : '—';
+    // Hata alanı
+    const errArea2 = $('err-short-area');
+    if (errArea2) {
+      if (data.lastError) { errArea2.textContent = data.lastError.slice(0, 80); errArea2.style.display = 'block'; }
+      else errArea2.style.display = 'none';
+    }
 
     setStatus(data.isRunning, data.lastError);
     updateSiteStatus(data);
