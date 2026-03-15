@@ -61,81 +61,52 @@ function gaussianDelay(min, max) {
   return Math.floor(min + n * (max - min));
 }
 
-// ─── CDP Fare Simülasyonu (isTrusted=true) ────────────────────────────────────
-// chrome.debugger API → Input.dispatchMouseEvent → gerçek tarayıcı fare eventi
-let _dbgTabId = null;
-
-async function dbgAttach(tabId) {
-  if (_dbgTabId === tabId) return true;
-  if (_dbgTabId !== null) { try { await chrome.debugger.detach({ tabId: _dbgTabId }); } catch (_) {} _dbgTabId = null; }
-  try {
-    await chrome.debugger.attach({ tabId }, '1.3');
-    _dbgTabId = tabId;
-    return true;
-  } catch (e) {
-    console.warn('[EmlakRadar] Debugger attach hatası:', e.message);
-    return false;
-  }
-}
-
-async function dbgDetach() {
-  if (_dbgTabId === null) return;
-  try { await chrome.debugger.detach({ tabId: _dbgTabId }); } catch (_) {}
-  _dbgTabId = null;
-}
-
-// Kübik Bezier eğrisi ile gerçekçi fare yolu (ease-in/out + mikro titreme)
-function _mousePath(x1, y1, x2, y2) {
-  const steps = 14 + Math.floor(Math.random() * 16);
-  const cx1 = x1 + (x2 - x1) * (0.2 + Math.random() * 0.3) + (Math.random() - 0.5) * 90;
-  const cy1 = y1 + (y2 - y1) * (0.1 + Math.random() * 0.3) + (Math.random() - 0.5) * 70;
-  const cx2 = x1 + (x2 - x1) * (0.6 + Math.random() * 0.2) + (Math.random() - 0.5) * 90;
-  const cy2 = y1 + (y2 - y1) * (0.6 + Math.random() * 0.3) + (Math.random() - 0.5) * 70;
-  const pts = [];
-  for (let i = 0; i <= steps; i++) {
-    const t  = i / steps;
-    const mt = 1 - t;
-    const bx = mt*mt*mt*x1 + 3*mt*mt*t*cx1 + 3*mt*t*t*cx2 + t*t*t*x2;
-    const by = mt*mt*mt*y1 + 3*mt*mt*t*cy1 + 3*mt*t*t*cy2 + t*t*t*y2;
-    // Ease: ortada hızlı, baş/sonda yavaş
-    const ease = 0.5 + Math.sin(t * Math.PI) * 0.6;
-    const jx = (Math.random() - 0.5) * 2; // mikro titreme
-    const jy = (Math.random() - 0.5) * 2;
-    pts.push({ x: Math.round(bx + jx), y: Math.round(by + jy), delay: Math.round((7 + Math.random() * 18) / ease) });
-  }
-  return pts;
-}
-
-// Fare simülasyonu — belirtilen süre boyunca doğal hareket
+// ─── Fare Simülasyonu (executeScript / MAIN world) ───────────────────────────
+// Not: chrome.debugger kullanmıyoruz — debugger attach banner'ı sahibinden
+// tarafından yan etkilerle tespit edilir (debugger; statement tetikleme,
+// timer precision değişimi). Bunun yerine executeScript ile synthetic event.
 async function simulateMouse(tabId, durationMs = 3000) {
-  if (!await dbgAttach(tabId)) return;
+  const endTs = Date.now() + durationMs;
   let cx = 300 + Math.floor(Math.random() * 700);
   let cy = 200 + Math.floor(Math.random() * 350);
-  const end = Date.now() + durationMs;
-  try {
-    // İlk hareket: rastgele başlangıç noktasına git
-    await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent',
-      { type: 'mouseMoved', x: cx, y: cy }).catch(() => {});
 
-    while (Date.now() < end) {
-      const tx = 80  + Math.floor(Math.random() * 1100);
-      const ty = 60  + Math.floor(Math.random() * 560);
-      const path = _mousePath(cx, cy, tx, ty);
+  while (Date.now() < endTs) {
+    const tx = 80  + Math.floor(Math.random() * 1100);
+    const ty = 60  + Math.floor(Math.random() * 560);
 
-      for (const pt of path) {
-        if (Date.now() >= end) break;
-        await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent',
-          { type: 'mouseMoved', x: pt.x, y: pt.y }).catch(() => {});
-        await sleep(pt.delay);
-      }
+    // Kübik Bezier ile adım adım ilerleme
+    const steps = 10 + Math.floor(Math.random() * 10);
+    for (let i = 1; i <= steps && Date.now() < endTs; i++) {
+      const t = i / steps;
+      const mt = 1 - t;
+      // Basit quadratic (control point ortası)
+      const mx = mt*mt*cx + 2*mt*t*((cx+tx)/2 + (Math.random()-0.5)*60) + t*t*tx;
+      const my = mt*mt*cy + 2*mt*t*((cy+ty)/2 + (Math.random()-0.5)*40) + t*t*ty;
 
-      // Duraklama: %30 ihtimalle uzun (okuma simülasyonu)
-      if (Math.random() < 0.3) await sleep(500 + Math.random() * 1500);
-      else                      await sleep(30  + Math.random() * 150);
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        world: 'MAIN',
+        func: (x, y) => {
+          document.dispatchEvent(new MouseEvent('mousemove', {
+            bubbles: true, cancelable: true,
+            clientX: x, clientY: y, screenX: x + 96, screenY: y + 140,
+            movementX: x - (window.__emlakPrevX || x), movementY: y - (window.__emlakPrevY || y),
+          }));
+          window.__emlakPrevX = x; window.__emlakPrevY = y;
+        },
+        args: [Math.round(mx), Math.round(my)],
+      }).catch(() => {});
 
-      cx = tx; cy = ty;
+      const ease = 0.4 + Math.sin(t * Math.PI) * 0.7;
+      await sleep(Math.round((8 + Math.random() * 20) / ease));
     }
-  } catch (e) { console.warn('[EmlakRadar] simulateMouse hatası:', e.message); }
+
+    // Duraklama: %30 ihtimalle uzun (okuma simülasyonu)
+    if (Math.random() < 0.3) await sleep(600 + Math.random() * 1600);
+    else                      await sleep(40  + Math.random() * 160);
+
+    cx = tx; cy = ty;
+  }
 }
 
 // Service worker uyanık tut — 25sn'de bir ping (Chrome resmi yöntemi)
@@ -945,7 +916,6 @@ async function _runAllScrapersInner(force = false) {
     }
 
   } finally {
-    await dbgDetach();
     chrome.tabs.remove(tabId).catch(() => {});
     isRunning = false;
     await chrome.storage.local.set({
