@@ -280,6 +280,7 @@ async function fetchIlanIcerik(url) {
     credentials: 'include',
   });
 
+  if (res.status === 429) throw new Error(`HTTP 429 — Too Many Requests`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const html = await res.text();
 
@@ -385,7 +386,15 @@ async function kuyruğuIsle() {
         const { metin, fotograflar } = await fetchIlanIcerik(ilk.url);
         await ilanIsle(metin, ilk.url, fotograflar, cfg);
       } catch (e) {
-        await log(`Hata: ${e.message.slice(0, 80)}`, 'hata');
+        const msg = e.message.slice(0, 80);
+        if (e.message.includes('429') || e.message.includes('Too Many')) {
+          // Rate limit — 60-120 saniye bekle
+          const bekle = 60000 + Math.random() * 60000;
+          await log(`429 Rate limit — ${Math.round(bekle/1000)}sn bekleniyor...`, 'hata');
+          await sleep(bekle);
+        } else {
+          await log(`Hata: ${msg}`, 'hata');
+        }
       }
 
       // Kuyruktaki ilanı işlendi işaretle
@@ -394,9 +403,9 @@ async function kuyruğuIsle() {
         kuyruk: k2.map(item => item.url === ilk.url ? { ...item, islendi: true } : item),
       });
 
-      // İlanlar arası kısa bekleme (2-5 sn) — bot riski minimumda tut
+      // İlanlar arası bekleme: 15-35 saniye (429 önleme)
       if (!kuyruguDurdur && bekleyen.length > 1) {
-        const bekle = 2000 + Math.random() * 3000;
+        const bekle = 15000 + Math.random() * 20000;
         await sleep(bekle);
       }
     }
