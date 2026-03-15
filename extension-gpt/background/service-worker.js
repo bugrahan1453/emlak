@@ -49,7 +49,11 @@ async function gptIlanParse(sayfaMetni, sayfaUrl, cfg) {
 
   const sistem = `
 Sen bir Türk emlak ilan veri çıkarma asistanısın.
-Sana sahibinden.com'dan bir emlak ilanının düz metin içeriği verilecek.
+Sana sahibinden.com ilan sayfasının içeriği verilecek. İçerik şu bölümleri içerebilir:
+- "YAPISAL VERİ (Next.js SSR)": JSON formatında sayfa verisi — en güvenilir kaynak, öncelikli kullan
+- "Başlık / Fiyat / Özellikler / Açıklama": HTML'den çıkarılmış bölümler
+- "SAYFA METNİ": Genel sayfa metni
+
 Aşağıdaki JSON formatında yapılandırılmış veri döndür (başka hiçbir şey yazma):
 {
   "baslik": "ilan başlığı",
@@ -70,7 +74,9 @@ Aşağıdaki JSON formatında yapılandırılmış veri döndür (başka hiçbir
   "emlak_tipi": "daire"
 }
 Kurallar:
-- fiyat: sadece rakam (TL, nokta, virgül yok)
+- fiyat: sadece rakam (TL, nokta, virgül yok). Örnek: "2.500.000 TL" → 2500000
+- metrekare: sadece sayı. Örnek: "120 m²" → 120
+- oda_sayisi: "3+1" gibi string olabilir
 - ilan_tipi: "satilik" veya "kiralik"
 - emlak_tipi: "daire", "villa", "mustakil", "arsa", "dukkan", "ofis" veya "diger"
 - Emin olmadığın alanlar için null döndür
@@ -297,25 +303,58 @@ async function fetchIlanIcerik(url) {
   });
 
   if (res.status === 429) throw new Error(`HTTP 429 — Too Many Requests`);
+  if (res.status === 404) throw new Error(`HTTP 404 — İlan kaldırılmış`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const html = await res.text();
 
-  // Script/style blokları kaldır, HTML etiketlerini temizle
-  const metin = html
+  const bolumler = [];
+
+  // 1. __NEXT_DATA__ (Next.js SSR) — en güvenilir veri kaynağı
+  // sahibinden Next.js kullanır, tüm ilan verisi bu JSON'da bulunur
+  const nextMatch = html.match(/<script[^>]*id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/i);
+  if (nextMatch) {
+    try {
+      const nd    = JSON.parse(nextMatch[1]);
+      const props = nd?.props?.pageProps ?? nd?.props ?? nd;
+      bolumler.push('=== YAPISAL VERİ (Next.js SSR) ===');
+      bolumler.push(JSON.stringify(props, null, 1).slice(0, 6000));
+    } catch (_) {}
+  }
+
+  // 2. Kritik HTML bölümleri — Next.js verisi yoksa veya eksikse
+  const temiz = html
     .replace(/<script[\s\S]*?<\/script>/gi, '')
     .replace(/<style[\s\S]*?<\/style>/gi, '')
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/\s{3,}/g, '\n')
-    .trim()
-    .slice(0, 7000);
+    .replace(/<!--[\s\S]*?-->/g, '');
 
-  // Fotoğraf URL'lerini HTML'den regex ile çıkar
-  // sahibinden CDN: i0.shbdn.com, i1.shbdn.com, dsmcdn.com vb.
+  // Başlık
+  const h1 = temiz.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
+  if (h1) bolumler.push('Başlık: ' + h1[1].replace(/<[^>]+>/g, '').trim());
+
+  // Fiyat — sahibinden'in fiyat container class'ları
+  const fiyat = temiz.match(/class="[^"]*(?:classified-price|price-container|fiyat)[^"]*"[^>]*>([\s\S]*?)<\/(?:div|span|h\d)>/i);
+  if (fiyat) bolumler.push('Fiyat: ' + fiyat[1].replace(/<[^>]+>/g, '').trim());
+
+  // Özellikler listesi (m², oda, kat, yaş, ısıtma vb.)
+  const ozellik = temiz.match(/class="[^"]*classified-info[^"]*"[^>]*>([\s\S]*?)<\/(?:ul|div|table)>/i);
+  if (ozellik) bolumler.push('Özellikler: ' + ozellik[1].replace(/<[^>]+>/g, ' | ').replace(/\s{2,}/g, ' ').trim());
+
+  // Açıklama metni
+  const acik = temiz.match(/(?:id|class)="[^"]*(?:classified-description|description|aciklama)[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+  if (acik) bolumler.push('Açıklama: ' + acik[1].replace(/<[^>]+>/g, ' ').replace(/\s{2,}/g, ' ').trim().slice(0, 1500));
+
+  // 3. Genel sayfa metni (fallback/ek bağlam)
+  const genelMetin = temiz
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/\s{3,}/g, '\n').trim()
+    .slice(0, 4000);
+  bolumler.push('=== SAYFA METNİ ===');
+  bolumler.push(genelMetin);
+
+  const metin = bolumler.join('\n').slice(0, 10000);
+
+  // Fotoğraf URL'lerini çıkar (sahibinden CDN)
   const fotoRegex = /(?:data-src|data-lazy|data-lazy-src|data-original|content|src)="(https:\/\/[^"]*(?:shbdn|sahibinden|dsmcdn|emlakjet|hurriyetemlak|cdn)[^"]*\.(?:jpg|jpeg|png|webp)(?:\?[^"]*)?)"/gi;
   const fotograflar = [];
   let m;
@@ -384,6 +423,11 @@ async function kuyruğuIsle() {
   await chrome.storage.local.set({ kuyrukCalisiyor: true });
   await log('Kuyruk işleme başladı', 'info');
 
+  // MV3 service worker 30sn'de kill edilebilir — keepalive ile önle
+  const keepAlive = setInterval(() => chrome.runtime.getPlatformInfo(() => {}), 20000);
+  // Watchdog alarm: SW yeniden başlarsa kuyruğu devam ettir
+  chrome.alarms.create('kuyruk-watchdog', { periodInMinutes: 1 });
+
   try {
     const cfg = await getConfig();
     if (!cfg.openaiApiKey) { await log('OpenAI API anahtarı eksik', 'hata'); return; }
@@ -397,17 +441,20 @@ async function kuyruğuIsle() {
       const ilk = bekleyen[0];
       await log(`Çekiliyor (${bekleyen.length} kaldı): ${ilk.url.split('/').slice(-2).join('/')}`, 'info');
 
+      let atla = false; // true = daha önce işlendi, bekleme yapma
       try {
-        // Detay sayfasını direkt fetch et
         const { metin, fotograflar } = await fetchIlanIcerik(ilk.url);
-        await ilanIsle(metin, ilk.url, fotograflar, cfg);
+        const sonuc = await ilanIsle(metin, ilk.url, fotograflar, cfg);
+        atla = sonuc?.durum === 'mevcut'; // zaten DB'de → hızlıca geç
       } catch (e) {
         const msg = e.message.slice(0, 80);
         if (e.message.includes('429') || e.message.includes('Too Many')) {
-          // Rate limit — 60-120 saniye bekle
           const bekle = 60000 + Math.random() * 60000;
           await log(`429 Rate limit — ${Math.round(bekle/1000)}sn bekleniyor...`, 'hata');
           await sleep(bekle);
+        } else if (e.message.includes('404')) {
+          await log(`İlan kaldırılmış, atlanıyor: ${ilk.url.split('/').slice(-1)[0]}`, 'info');
+          atla = true; // 404 → bekleme olmadan geç
         } else {
           await log(`Hata: ${msg}`, 'hata');
         }
@@ -419,14 +466,18 @@ async function kuyruğuIsle() {
         kuyruk: k2.map(item => item.url === ilk.url ? { ...item, islendi: true } : item),
       });
 
-      // İlanlar arası bekleme: 15-35 saniye (429 önleme)
-      if (!kuyruguDurdur && bekleyen.length > 1) {
+      // Aktif (zaten işlenmiş/404) → bekleme YOK, hemen sonrakine geç
+      // Gerçekten çekilen yeni ilan → 15-35sn bekle (429 önleme)
+      if (!atla && !kuyruguDurdur && bekleyen.length > 1) {
         const bekle = 15000 + Math.random() * 20000;
+        await log(`Sonraki ilan için ${Math.round(bekle/1000)}sn bekleniyor...`, 'info');
         await sleep(bekle);
       }
     }
 
   } finally {
+    clearInterval(keepAlive);
+    chrome.alarms.clear('kuyruk-watchdog').catch(() => {});
     kuyrukCalisiyor = false;
     await chrome.storage.local.set({ kuyrukCalisiyor: false });
     await log(kuyruguDurdur ? 'Kuyruk durduruldu' : 'Kuyruk tamamlandı', 'info');
@@ -434,6 +485,23 @@ async function kuyruğuIsle() {
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ─── Alarm Handler (Watchdog + Service Worker Restart Koruması) ──────────────
+// MV3 service worker kill edilince kuyruk-watchdog alarmı SW'yi uyandırır
+// ve kuyruğu devam ettirir
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name !== 'kuyruk-watchdog') return;
+  const { kuyrukCalisiyor: depoCal } = await chrome.storage.local.get('kuyrukCalisiyor');
+  // Depo "çalışıyor" ama bellek değişkeni false = SW yeniden başladı
+  if (depoCal && !kuyrukCalisiyor) {
+    await log('Watchdog: SW yeniden başladı, kuyruk devam ettiriliyor...', 'info');
+    kuyruğuIsle().catch(async e => {
+      await log(`Watchdog restart hatası: ${e.message}`, 'hata');
+      kuyrukCalisiyor = false;
+      await chrome.storage.local.set({ kuyrukCalisiyor: false });
+    });
+  }
+});
 
 // ─── Mesaj Dinleyici ─────────────────────────────────────────────────────────
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
