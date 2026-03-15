@@ -329,6 +329,15 @@ function fetchIlanIcerik(url) {
               return { hata: 'redirect:' + u };
             }
 
+            // URL değişmeden challenge/captcha gösteriliyor olabilir
+            // İlan sayfasında her zaman /ilan/ URL'si ve h1 + ilan numarası olmalı
+            const ilanIdMatch = u.match(/\/ilan\/[^/]+-(\d{7,})/);
+            const sayfaH1 = document.querySelector('h1')?.innerText?.trim() ?? '';
+            const bodyLen = document.body?.innerText?.length ?? 0;
+            if (ilanIdMatch && !sayfaH1 && bodyLen < 2000) {
+              return { hata: 'challenge:bot-koruma-tespit-edildi' };
+            }
+
             // __NEXT_DATA__ (Next.js SSR) — yapısal veri
             let nextDataStr = null;
             const nd = document.getElementById('__NEXT_DATA__');
@@ -375,8 +384,8 @@ function fetchIlanIcerik(url) {
           const d = results?.[0]?.result;
           if (!d) return reject(new Error('executeScript sonuç döndürmedi'));
           if (d.hata) {
-            if (d.hata.startsWith('redirect:')) {
-              return reject(new Error('Sahibinden giriş/challenge sayfasına yönlendirdi'));
+            if (d.hata.startsWith('redirect:') || d.hata.startsWith('challenge:')) {
+              return reject(new Error('BOT_KORUMA: Sahibinden bot koruması/challenge sayfası gösterdi'));
             }
             return reject(new Error(d.hata));
           }
@@ -483,11 +492,17 @@ async function kuyruğuIsle() {
         const sonuc = await ilanIsle(metin, ilk.url, fotograflar, cfg);
         atla = sonuc?.durum === 'mevcut'; // zaten DB'de → hızlıca geç
       } catch (e) {
-        const msg = e.message.slice(0, 80);
+        const msg = e.message.slice(0, 100);
         if (e.message.includes('429') || e.message.includes('Too Many')) {
           const bekle = 60000 + Math.random() * 60000;
           await log(`429 Rate limit — ${Math.round(bekle/1000)}sn bekleniyor...`, 'hata');
           await sleep(bekle);
+          continue; // islendi işaretleme — tekrar dene
+        } else if (e.message.startsWith('BOT_KORUMA')) {
+          const bekle = 180000 + Math.random() * 60000; // 3-4 dakika
+          await log(`⚠️ Bot koruması — ${Math.round(bekle/1000)}sn bekleniyor (Sahibinden'i manuel kullanmayın)`, 'hata');
+          await sleep(bekle);
+          continue; // islendi işaretleme — tekrar dene
         } else if (e.message.includes('404')) {
           await log(`İlan kaldırılmış, atlanıyor: ${ilk.url.split('/').slice(-1)[0]}`, 'info');
           atla = true; // 404 → bekleme olmadan geç
