@@ -82,7 +82,7 @@ Kurallar:
 - Emin olmadığın alanlar için null döndür
 `.trim();
 
-  const kullanici = `Sayfa URL: ${sayfaUrl}\n\n${sayfaMetni.slice(0, 6000)}`;
+  const kullanici = `Sayfa URL: ${sayfaUrl}\n\n${sayfaMetni}`;
 
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 45000); // 45sn timeout
@@ -382,19 +382,20 @@ function fetchIlanIcerik(url) {
           }
 
           const bolumler = [];
-          if (d.nextDataStr) {
-            bolumler.push('=== YAPISAL VERİ (Next.js SSR) ===');
-            bolumler.push(d.nextDataStr);
-          }
+          // Kritik alanları başa koy — nextDataStr kalabalığı kesmesin
           if (d.baslik)   bolumler.push('Başlık: '     + d.baslik);
           if (d.fiyat)    bolumler.push('Fiyat: '      + d.fiyat);
           if (d.specs)    bolumler.push('Özellikler: ' + d.specs);
           if (d.aciklama) bolumler.push('Açıklama: '   + d.aciklama);
+          if (d.nextDataStr) {
+            bolumler.push('=== YAPISAL VERİ (Next.js SSR) ===');
+            bolumler.push(d.nextDataStr);
+          }
           bolumler.push('=== SAYFA METNİ ===');
           bolumler.push(d.bodyText);
 
           resolve({
-            metin:      bolumler.join('\n').slice(0, 10000),
+            metin:      bolumler.join('\n').slice(0, 12000),
             fotograflar: d.fotos,
           });
         });
