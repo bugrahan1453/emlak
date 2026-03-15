@@ -265,6 +265,50 @@ async function kuyruğaEkle(urlListesi) {
   return yeniler.length;
 }
 
+// ─── İlan Sayfasını Direkt Fetch Et (sekme açma) ─────────────────────────────
+async function fetchIlanIcerik(url) {
+  const res = await fetch(url, {
+    headers: {
+      'Accept':          'text/html,application/xhtml+xml',
+      'Accept-Language': 'tr-TR,tr;q=0.9,en;q=0.5',
+      'Cache-Control':   'no-cache',
+      'Referer':         'https://www.sahibinden.com/',
+    },
+    credentials: 'omit',
+  });
+
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const html = await res.text();
+
+  // Script/style blokları kaldır, HTML etiketlerini temizle
+  const metin = html
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/\s{3,}/g, '\n')
+    .trim()
+    .slice(0, 7000);
+
+  // Fotoğraf URL'lerini HTML'den regex ile çıkar
+  const fotoRegex = /(?:data-src|data-lazy|src)="(https:\/\/[^"]*(?:sahibinden|cdn)[^"]*\.(?:jpg|jpeg|png|webp)(?:\?[^"]*)?)"/gi;
+  const fotograflar = [];
+  let m;
+  while ((m = fotoRegex.exec(html)) !== null) {
+    const src = m[1];
+    if (!src.includes('placeholder') && !src.includes('no-image') && !src.includes('sprite')) {
+      fotograflar.push(src);
+    }
+  }
+
+  return { metin, fotograflar: [...new Set(fotograflar)].slice(0, 15) };
+}
+
+// ─── Kuyruk İşleme (fetch tabanlı, sekme açmaz) ───────────────────────────────
 async function kuyruğuIsle() {
   if (kuyrukCalisiyor) return;
   kuyrukCalisiyor = true;
@@ -274,129 +318,42 @@ async function kuyruğuIsle() {
 
   try {
     const cfg = await getConfig();
-    if (!cfg.openaiApiKey) {
-      await log('OpenAI API anahtarı eksik — ayarlara girin', 'hata');
-      return;
-    }
-    if (!cfg.webhookUrl) {
-      await log('Webhook URL eksik — ayarlara girin', 'hata');
-      return;
-    }
+    if (!cfg.openaiApiKey) { await log('OpenAI API anahtarı eksik', 'hata'); return; }
+    if (!cfg.webhookUrl)   { await log('Webhook URL eksik', 'hata'); return; }
 
-    // Tek scraper sekmesi aç
-    const tab = await chrome.tabs.create({ url: 'https://www.sahibinden.com', active: false });
-    const tabId = tab.id;
-    await chrome.storage.local.set({ scrapeTabId: tabId });
+    while (!kuyruguDurdur) {
+      const { kuyruk = [] } = await chrome.storage.local.get('kuyruk');
+      const bekleyen = kuyruk.filter(k => !k.islendi);
+      if (bekleyen.length === 0) { await log('Kuyruk bitti', 'ok'); break; }
 
-    try {
-      while (!kuyruguDurdur) {
-        const { kuyruk = [] } = await chrome.storage.local.get('kuyruk');
-        const bekleyen = kuyruk.filter(k => !k.islendi);
-        if (bekleyen.length === 0) {
-          await log('Kuyruk bitti', 'ok');
-          break;
-        }
+      const ilk = bekleyen[0];
+      await log(`Çekiliyor (${bekleyen.length} kaldı): ${ilk.url.split('/').slice(-2).join('/')}`, 'info');
 
-        const ilk = bekleyen[0];
-        await log(`İşleniyor (${bekleyen.length} kaldı): ${ilk.url}`, 'info');
-
-        // Sayfaya git
-        await yenileSekmeyiVeBekle(tabId, ilk.url);
-
-        // Sayfadan veri çek
-        const sonuc = await sekmeyiCalistir(tabId);
-        if (sonuc) {
-          await ilanIsle(sonuc.metin, ilk.url, sonuc.fotograflar, cfg);
-        } else {
-          await log(`Veri çekilemedi: ${ilk.url}`, 'hata');
-        }
-
-        // Kuyruktaki ilanı işlendi olarak işaretle
-        const { kuyruk: k2 = [] } = await chrome.storage.local.get('kuyruk');
-        const guncellendi = k2.map(item =>
-          item.url === ilk.url ? { ...item, islendi: true } : item
-        );
-        await chrome.storage.local.set({ kuyruk: guncellendi });
-
-        if (!kuyruguDurdur && bekleyen.length > 1) {
-          const bekle = (cfg.delaySaniye * 1000) + (Math.random() * 60000);
-          await log(`${Math.round(bekle / 1000)}sn bekleniyor...`, 'info');
-          await sleep(bekle);
-        }
+      try {
+        // Detay sayfasını direkt fetch et
+        const { metin, fotograflar } = await fetchIlanIcerik(ilk.url);
+        await ilanIsle(metin, ilk.url, fotograflar, cfg);
+      } catch (e) {
+        await log(`Hata: ${e.message.slice(0, 80)}`, 'hata');
       }
-    } finally {
-      chrome.tabs.remove(tabId).catch(() => {});
-      await chrome.storage.local.set({ scrapeTabId: null });
+
+      // Kuyruktaki ilanı işlendi işaretle
+      const { kuyruk: k2 = [] } = await chrome.storage.local.get('kuyruk');
+      await chrome.storage.local.set({
+        kuyruk: k2.map(item => item.url === ilk.url ? { ...item, islendi: true } : item),
+      });
+
+      // İlanlar arası kısa bekleme (2-5 sn) — bot riski minimumda tut
+      if (!kuyruguDurdur && bekleyen.length > 1) {
+        const bekle = 2000 + Math.random() * 3000;
+        await sleep(bekle);
+      }
     }
 
   } finally {
     kuyrukCalisiyor = false;
     await chrome.storage.local.set({ kuyrukCalisiyor: false });
     await log(kuyruguDurdur ? 'Kuyruk durduruldu' : 'Kuyruk tamamlandı', 'info');
-  }
-}
-
-// Sekmeye git ve yüklenmeyi bekle
-function yenileSekmeyiVeBekle(tabId, url, timeout = 30000) {
-  return new Promise((resolve, reject) => {
-    chrome.tabs.update(tabId, { url }, () => {
-      if (chrome.runtime.lastError) { reject(new Error(chrome.runtime.lastError.message)); return; }
-      const baslangic = Date.now();
-      function kontrol(updatedId, info) {
-        if (updatedId !== tabId || info.status !== 'complete') return;
-        if (Date.now() - baslangic > timeout) {
-          chrome.tabs.onUpdated.removeListener(kontrol);
-          resolve(); return;
-        }
-        chrome.tabs.onUpdated.removeListener(kontrol);
-        resolve();
-      }
-      chrome.tabs.onUpdated.addListener(kontrol);
-      setTimeout(() => { chrome.tabs.onUpdated.removeListener(kontrol); resolve(); }, timeout);
-    });
-  });
-}
-
-// Sekmedeki sahibinden sayfasından veri çek
-async function sekmeyiCalistir(tabId) {
-  try {
-    await sleep(3000 + Math.random() * 2000); // Sayfa tamamen yüklenmesini bekle
-    const sonuc = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: () => {
-        if (!location.href.includes('/ilan/')) return null;
-
-        // Sayfadan metin çıkar
-        const gorunenMetin = [];
-        const baslikEl = document.querySelector('h1');
-        if (baslikEl) gorunenMetin.push(baslikEl.innerText.trim());
-
-        const icerikEl = document.querySelector(
-          '#classifiedDetail, .classified-detail-main, .classifiedDetail, main, article'
-        ) || document.body;
-        gorunenMetin.push(icerikEl.innerText.slice(0, 8000));
-
-        // Fotoğrafları çek (GPT bu işi yapamaz)
-        const fotograflar = [];
-        document.querySelectorAll(
-          '.classified-detail-gallery img, .gallery-container img, .swiper-slide img, [class*="gallery"] img'
-        ).forEach(img => {
-          const src = img.getAttribute('data-src') || img.getAttribute('data-lazy') || img.src || '';
-          if (src && src.startsWith('http') && !src.includes('placeholder') && !src.includes('no-image')) {
-            fotograflar.push(src);
-          }
-        });
-
-        return {
-          metin:      gorunenMetin.join('\n\n'),
-          fotograflar: [...new Set(fotograflar)].slice(0, 15),
-        };
-      },
-    });
-    return sonuc?.[0]?.result || null;
-  } catch (e) {
-    console.warn('[EmlakRadar GPT] Sekme çalıştırma hatası:', e.message);
-    return null;
   }
 }
 
@@ -499,7 +456,34 @@ async function handleMesaj(msg, sender) {
       return { tamam: true, eklenen: toplamEklenen };
     }
 
-    // Kullanıcı liste sayfasındaydı, URL'leri kuyruğa ekle (eski mod, artık kullanılmıyor)
+    // Popup: URL gir → liste sayfasını fetch et → linkleri kuyruğa ekle
+    case 'LISTE_URL_EKLE': {
+      const hedefUrl = msg.url;
+      if (!hedefUrl?.includes('sahibinden.com')) return { tamam: false, mesaj: 'Geçersiz URL' };
+      try {
+        const res = await fetch(hedefUrl, {
+          headers: { 'Accept': 'text/html', 'Accept-Language': 'tr-TR,tr;q=0.9', 'Referer': 'https://www.sahibinden.com/' },
+          credentials: 'omit',
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const html = await res.text();
+        // İlan linklerini regex ile çıkar
+        const ilanUrls = [];
+        const linkRegex = /href="(\/ilan\/[^"?]+)"/gi;
+        let lm;
+        while ((lm = linkRegex.exec(html)) !== null) {
+          const tam = 'https://www.sahibinden.com' + lm[1];
+          if (!ilanUrls.includes(tam)) ilanUrls.push(tam);
+        }
+        const eklenen = await kuyruğaEkle(ilanUrls);
+        return { tamam: true, eklenen };
+      } catch (e) {
+        await log(`Liste fetch hatası: ${e.message}`, 'hata');
+        return { tamam: false, mesaj: e.message };
+      }
+    }
+
+    // Content script: liste sayfasındaki URL'leri kuyruğa ekle
     case 'LISTE_KUYRUGA_EKLE': {
       const eklenen = await kuyruğaEkle(msg.urlListesi || []);
       return { tamam: true, eklenen };

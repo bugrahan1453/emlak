@@ -108,19 +108,15 @@ els.btnUrlEkle.addEventListener('click', async () => {
     return;
   }
 
-  // Arka planda sekme aç → content script URL'leri kuyruğa ekler
-  const tab = await chrome.tabs.create({ url, active: false });
-
-  // Sekme yüklenince kapat (content script zaten mesajı gönderdi)
-  chrome.tabs.onUpdated.addListener(function dinle(tabId, info) {
-    if (tabId !== tab.id || info.status !== 'complete') return;
-    chrome.tabs.onUpdated.removeListener(dinle);
-    setTimeout(() => chrome.tabs.remove(tab.id).catch(() => {}), 3000);
-  });
-
-  urlMesajGoster('✅ URL açılıyor, ilanlar kuyruğa ekleniyor...', '#68d391');
+  // Background'a gönder — liste sayfasını fetch edip URL'leri toplar
+  const r = await chrome.runtime.sendMessage({ tip: 'LISTE_URL_EKLE', url });
+  if (r?.tamam) {
+    urlMesajGoster(`✅ ${r.eklenen} ilan kuyruğa eklendi`, '#68d391');
+  } else {
+    urlMesajGoster('⚠ ' + (r?.mesaj || 'Hata'), '#fc8181');
+  }
   els.urlInput.value = '';
-  setTimeout(durumGuncelle, 4000);
+  setTimeout(durumGuncelle, 1000);
 });
 
 function urlMesajGoster(metin, renk) {

@@ -3,7 +3,7 @@
   "name": "EmlakRadar GPT",
   "version": "1.0.0",
   "description": "GPT-4o ile sahibinden.com'dan akıllı ilan çekme — sıfır bot riski",
-  "permissions": ["activeTab", "storage", "notifications", "scripting", "tabs", "alarms"],
+  "permissions": ["storage", "notifications", "alarms"],
   "host_permissions": [
     "https://www.sahibinden.com/*",
     "https://api.openai.com/*"
