@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS ilanlar (
     INDEX idx_durum (durum),
     INDEX idx_kaynak (kaynak_url(191)),
     INDEX idx_tip (ilan_tipi, emlak_tipi),
+    UNIQUE KEY uk_kaynak_id (kaynak_site, kaynak_id),
     FULLTEXT idx_arama (baslik, adres)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

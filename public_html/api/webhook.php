@@ -119,7 +119,15 @@ switch ($tip) {
                 if (!$ilanData['baslik']) { $atilan++; continue; }
                 // Fiyat 0 ise logla ama kaydetmeye devam et (fiyat çekilememiş olabilir)
 
-                $yeniId = $ilanModel->create($ilanData);
+                try {
+                    $yeniId = $ilanModel->create($ilanData);
+                } catch (PDOException $dupEx) {
+                    // Duplicate key (SQLSTATE 23000) — iki paralel run aynı ilanı eklemeye çalıştı
+                    if (str_starts_with($dupEx->getCode(), '23')) {
+                        $atilan++; continue;
+                    }
+                    throw $dupEx;
+                }
                 $eklenen++;
 
                 // Bildirim
