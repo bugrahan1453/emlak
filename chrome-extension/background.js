@@ -595,6 +595,7 @@ async function _runAllScrapersInner(force = false) {
             // ── Her ilan için: detay sayfasına gir → siteye kaydet ─────────
             const listSayfasi = nextUrl || job.url; // detaylar arası dönülecek sayfa
             let botBan = false;
+            let detailCount = 0; // bu turda kaç detay açıldı
 
             for (let i = 0; i < yeniler.length; i++) {
               if (shouldStop || botBan) break;
@@ -656,6 +657,7 @@ async function _runAllScrapersInner(force = false) {
 
                 const wh = await sendWebhook([full], cfg);
                 await markGoruldu([full]);
+                detailCount++;
                 if (wh.eklenen > 0) {
                   toplamYeni++;
                   sendProgress(`✓ ${site} · "${ilan.baslik?.slice(0, 30)}" → siteye eklendi`, 'ok');
@@ -670,22 +672,31 @@ async function _runAllScrapersInner(force = false) {
                 console.warn('[EmlakRadar] Detay hatası:', err.message);
               }
 
-              // ── Detaylar arası: liste sayfasına dön, kısa bekle, sonraki ──
-              // İnsan davranışı: detay → geri → liste → detay (pattern kırılır)
+              if (shouldStop || botBan) break;
+
+              // ── Her 8 ilandan sonra büyük mola (sahibinden pattern kırmak için) ──
+              if (detailCount > 0 && detailCount % 8 === 0) {
+                const molaSure = 240000 + Math.random() * 120000; // 4-6 dakika
+                sendProgress(`${site}: ${detailCount} ilan çekildi — ${Math.round(molaSure/60000)}dk mola (bot önleme)...`);
+                await navigateTab(tabId, site === 'sahibinden' ? 'https://www.sahibinden.com' : listSayfasi);
+                await sleep(molaSure);
+              }
+
+              // ── Detaylar arası: liste sayfasına dön, bekle ──
               if (!shouldStop && !botBan && i < yeniler.length - 1) {
-                const bekle = 20000 + Math.random() * 20000; // 20-40sn
+                const bekle = 90000 + Math.random() * 60000; // 1.5-2.5 dakika
                 sendProgress(`${site}: liste sayfasına dönüyor, ${Math.round(bekle/1000)}sn sonra devam...`);
-                await navigateTab(tabId, listSayfasi); // geri dön
-                await sleep(bekle);                     // listede oku
+                await navigateTab(tabId, listSayfasi);
+                await sleep(bekle);
               }
             }
 
-            // Sayfalar arası kısa bekleme
-            if (nextUrl && !shouldStop) await sleep(5000 + Math.random() * 5000);
+            // Sayfalar arası bekleme
+            if (nextUrl && !shouldStop) await sleep(20000 + Math.random() * 20000); // 20-40sn
           }
 
           // Kategoriler arası bekleme
-          if (!shouldStop) await sleep(6000 + Math.random() * 6000);
+          if (!shouldStop) await sleep(45000 + Math.random() * 45000); // 45-90sn
         }
 
       } catch (err) {
@@ -695,7 +706,7 @@ async function _runAllScrapersInner(force = false) {
       }
 
       // Siteler arası bekleme
-      if (!shouldStop) await sleep(15000 + Math.random() * 10000);
+      if (!shouldStop) await sleep(180000 + Math.random() * 120000); // 3-5 dakika
     }
 
   } finally {
