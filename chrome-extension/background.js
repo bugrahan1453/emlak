@@ -610,13 +610,16 @@ async function _runAllScrapersInner(force = false) {
   console.log(`[EmlakRadar] Başladı — ${cities.join(', ')}`);
   sendProgress(`Başlıyor... ${cities.join(', ')}`);
 
-  const tab   = await createTab('about:blank');
+  const homeUrls = { sahibinden: 'https://www.sahibinden.com', hepsiemlak: 'https://www.hepsiemlak.com', emlakjet: 'https://www.emlakjet.com' };
+  const firstSite = SITE_ORDER.find(s => jobs.some(j => j.site === s)) || SITE_ORDER[0];
+  const tab   = await createTab(homeUrls[firstSite]);
   const tabId = tab.id;
   await chrome.storage.local.set({ scrapeTabId: tabId });
   await setRandomViewport(tabId);
   let toplamYeni = 0;
 
   try {
+    let isFirstSiteTab = true;
     for (const site of SITE_ORDER) {
       if (shouldStop) break;
       const siteJobs = jobs.filter(j => j.site === site);
@@ -627,13 +630,16 @@ async function _runAllScrapersInner(force = false) {
       if (site === 'sahibinden') {
         let ok = false;
         try { ok = await checkSessionBeforeScrape(); } catch (e) { ok = true; }
-        if (!ok) { sendProgress(`⚠️ Sahibinden atlandı — oturum yok`, 'error'); continue; }
+        if (!ok) { sendProgress(`⚠️ Sahibinden atlandı — oturum yok`, 'error'); isFirstSiteTab = false; continue; }
       }
 
       // ── Referer zinciri: önce ana sayfa aç ────────────────────────────────
-      const homeUrls = { sahibinden: 'https://www.sahibinden.com', hepsiemlak: 'https://www.hepsiemlak.com', emlakjet: 'https://www.emlakjet.com' };
       sendProgress(`${site}: ana sayfa açılıyor (referer zinciri)...`);
-      await navigateTab(tabId, homeUrls[site]);
+      // Tab was already opened to this site's homepage — skip redundant navigation
+      if (!isFirstSiteTab || site !== firstSite) {
+        await navigateTab(tabId, homeUrls[site]);
+      }
+      isFirstSiteTab = false;
       await hideWebdriver(tabId);
       await sleep(gaussianDelay(3000, 5000));
       if (await checkBotBlock(tabId)) {
