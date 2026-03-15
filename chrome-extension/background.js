@@ -61,6 +61,83 @@ function gaussianDelay(min, max) {
   return Math.floor(min + n * (max - min));
 }
 
+// ─── CDP Fare Simülasyonu (isTrusted=true) ────────────────────────────────────
+// chrome.debugger API → Input.dispatchMouseEvent → gerçek tarayıcı fare eventi
+let _dbgTabId = null;
+
+async function dbgAttach(tabId) {
+  if (_dbgTabId === tabId) return true;
+  if (_dbgTabId !== null) { try { await chrome.debugger.detach({ tabId: _dbgTabId }); } catch (_) {} _dbgTabId = null; }
+  try {
+    await chrome.debugger.attach({ tabId }, '1.3');
+    _dbgTabId = tabId;
+    return true;
+  } catch (e) {
+    console.warn('[EmlakRadar] Debugger attach hatası:', e.message);
+    return false;
+  }
+}
+
+async function dbgDetach() {
+  if (_dbgTabId === null) return;
+  try { await chrome.debugger.detach({ tabId: _dbgTabId }); } catch (_) {}
+  _dbgTabId = null;
+}
+
+// Kübik Bezier eğrisi ile gerçekçi fare yolu (ease-in/out + mikro titreme)
+function _mousePath(x1, y1, x2, y2) {
+  const steps = 14 + Math.floor(Math.random() * 16);
+  const cx1 = x1 + (x2 - x1) * (0.2 + Math.random() * 0.3) + (Math.random() - 0.5) * 90;
+  const cy1 = y1 + (y2 - y1) * (0.1 + Math.random() * 0.3) + (Math.random() - 0.5) * 70;
+  const cx2 = x1 + (x2 - x1) * (0.6 + Math.random() * 0.2) + (Math.random() - 0.5) * 90;
+  const cy2 = y1 + (y2 - y1) * (0.6 + Math.random() * 0.3) + (Math.random() - 0.5) * 70;
+  const pts = [];
+  for (let i = 0; i <= steps; i++) {
+    const t  = i / steps;
+    const mt = 1 - t;
+    const bx = mt*mt*mt*x1 + 3*mt*mt*t*cx1 + 3*mt*t*t*cx2 + t*t*t*x2;
+    const by = mt*mt*mt*y1 + 3*mt*mt*t*cy1 + 3*mt*t*t*cy2 + t*t*t*y2;
+    // Ease: ortada hızlı, baş/sonda yavaş
+    const ease = 0.5 + Math.sin(t * Math.PI) * 0.6;
+    const jx = (Math.random() - 0.5) * 2; // mikro titreme
+    const jy = (Math.random() - 0.5) * 2;
+    pts.push({ x: Math.round(bx + jx), y: Math.round(by + jy), delay: Math.round((7 + Math.random() * 18) / ease) });
+  }
+  return pts;
+}
+
+// Fare simülasyonu — belirtilen süre boyunca doğal hareket
+async function simulateMouse(tabId, durationMs = 3000) {
+  if (!await dbgAttach(tabId)) return;
+  let cx = 300 + Math.floor(Math.random() * 700);
+  let cy = 200 + Math.floor(Math.random() * 350);
+  const end = Date.now() + durationMs;
+  try {
+    // İlk hareket: rastgele başlangıç noktasına git
+    await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent',
+      { type: 'mouseMoved', x: cx, y: cy }).catch(() => {});
+
+    while (Date.now() < end) {
+      const tx = 80  + Math.floor(Math.random() * 1100);
+      const ty = 60  + Math.floor(Math.random() * 560);
+      const path = _mousePath(cx, cy, tx, ty);
+
+      for (const pt of path) {
+        if (Date.now() >= end) break;
+        await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent',
+          { type: 'mouseMoved', x: pt.x, y: pt.y }).catch(() => {});
+        await sleep(pt.delay);
+      }
+
+      // Duraklama: %30 ihtimalle uzun (okuma simülasyonu)
+      if (Math.random() < 0.3) await sleep(500 + Math.random() * 1500);
+      else                      await sleep(30  + Math.random() * 150);
+
+      cx = tx; cy = ty;
+    }
+  } catch (e) { console.warn('[EmlakRadar] simulateMouse hatası:', e.message); }
+}
+
 // Service worker uyanık tut — 25sn'de bir ping (Chrome resmi yöntemi)
 function waitUntil(promise) {
   const keepAlive = setInterval(() => chrome.runtime.getPlatformInfo(() => {}), 25000);
@@ -661,13 +738,14 @@ async function _runAllScrapersInner(force = false) {
 
       // ── Referer zinciri: önce ana sayfa aç ────────────────────────────────
       sendProgress(`${site}: ana sayfa açılıyor (referer zinciri)...`);
-      // Tab was already opened to this site's homepage — skip redundant navigation
       if (!isFirstSiteTab || site !== firstSite) {
         await navigateTab(tabId, homeUrls[site]);
       }
       isFirstSiteTab = false;
       await hideWebdriver(tabId);
-      await sleep(gaussianDelay(3000, 5000));
+      // Ana sayfada fare hareketi — gerçek kullanıcı gibi geziniyor
+      await simulateMouse(tabId, gaussianDelay(2500, 4500));
+      await sleep(gaussianDelay(1500, 3000));
       if (await checkBotBlock(tabId)) {
         sendProgress(`⚠️ ${site} ana sayfa bot bloğu — site atlanıyor`, 'error');
         await logError(site, 'bot_block_home', `Ana sayfa bot bloğu`, { url: homeUrls[site] });
@@ -688,8 +766,9 @@ async function _runAllScrapersInner(force = false) {
 
             await navigateTab(tabId, nextUrl);
             await hideWebdriver(tabId);
-            // Cloudflare JS challenge 2-5sn içinde otomatik tamamlanır
-            await sleep(gaussianDelay(3500, 6000));
+            // Liste sayfasında fare hareketi + bekleme (Cloudflare challenge geçişi)
+            await simulateMouse(tabId, gaussianDelay(3000, 5500));
+            await sleep(gaussianDelay(1000, 2500));
 
             if (await checkBotBlock(tabId)) {
               const botMsg = `Bot bloğu/Cloudflare — sayfa atlandı: ${nextUrl}`;
@@ -746,8 +825,9 @@ async function _runAllScrapersInner(force = false) {
               try {
                 await navigateTab(tabId, ilan.kaynak_url);
                 await hideWebdriver(tabId);
-                // Cloudflare challenge otomatik tamamlansın
-                await sleep(gaussianDelay(3000, 5500));
+                // Detay sayfasında fare hareketi — gerçek okuma davranışı
+                await simulateMouse(tabId, gaussianDelay(2500, 4500));
+                await sleep(gaussianDelay(800, 2000));
 
                 // 404 / süresi dolmuş ilan kontrolü — ban tetiklemez, atla
                 const pageState = await chrome.scripting.executeScript({
@@ -865,6 +945,7 @@ async function _runAllScrapersInner(force = false) {
     }
 
   } finally {
+    await dbgDetach();
     chrome.tabs.remove(tabId).catch(() => {});
     isRunning = false;
     await chrome.storage.local.set({
@@ -951,7 +1032,7 @@ async function setRandomViewport(tabId) {
 
 function createTab(url, timeoutMs = 45000) {
   return new Promise((resolve, reject) => {
-    chrome.tabs.create({ url, active: false }, tab => {
+    chrome.tabs.create({ url, active: true }, tab => {
       if (chrome.runtime.lastError) { reject(new Error(chrome.runtime.lastError.message)); return; }
       const timer = setTimeout(() => {
         chrome.tabs.onUpdated.removeListener(onUpdated);

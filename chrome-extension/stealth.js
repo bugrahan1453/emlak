@@ -72,13 +72,66 @@ try {
 
 // 5. Chrome otomasyon izlerini gizle
 try {
-  // window.chrome.runtime.id varlığı bazı tespitlerde kullanılır
-  // Silmek yerine orijinali koru — silinince daha şüpheli görünür
-  // chrome.app.isInstalled sıfır yapılır
   if (window.chrome && window.chrome.app) {
     Object.defineProperty(window.chrome.app, 'isInstalled', {
       get: () => false,
       configurable: true,
     });
   }
+} catch (_) {}
+
+// 6. WebGL fingerprint — yaygın laptop GPU profili (Intel UHD 620)
+// Cloudflare/FingerprintJS renderer bilgisini fingerprint için kullanır
+try {
+  const _glGetParam = WebGLRenderingContext.prototype.getParameter;
+  WebGLRenderingContext.prototype.getParameter = function (param) {
+    if (param === 37445) return 'Intel Inc.';
+    if (param === 37446) return 'ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)';
+    return _glGetParam.call(this, param);
+  };
+} catch (_) {}
+try {
+  const _gl2GetParam = WebGL2RenderingContext.prototype.getParameter;
+  WebGL2RenderingContext.prototype.getParameter = function (param) {
+    if (param === 37445) return 'Intel Inc.';
+    if (param === 37446) return 'ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)';
+    return _gl2GetParam.call(this, param);
+  };
+} catch (_) {}
+
+// 7. Navigator properties — gerçekçi Türk kullanıcı profili
+try {
+  Object.defineProperty(navigator, 'languages',          { get: () => ['tr-TR', 'tr', 'en-US', 'en'], configurable: true });
+  Object.defineProperty(navigator, 'platform',           { get: () => 'Win32',                        configurable: true });
+  Object.defineProperty(navigator, 'hardwareConcurrency',{ get: () => 8,                              configurable: true });
+  Object.defineProperty(navigator, 'deviceMemory',       { get: () => 8,                              configurable: true });
+  Object.defineProperty(navigator, 'maxTouchPoints',     { get: () => 0,                              configurable: true });
+} catch (_) {}
+
+// 8. Network Information API — gerçekçi bağlantı bilgisi
+try {
+  if (navigator.connection) {
+    Object.defineProperty(navigator.connection, 'effectiveType', { get: () => '4g',  configurable: true });
+    Object.defineProperty(navigator.connection, 'downlink',      { get: () => 10,    configurable: true });
+    Object.defineProperty(navigator.connection, 'rtt',           { get: () => 50,    configurable: true });
+    Object.defineProperty(navigator.connection, 'saveData',      { get: () => false, configurable: true });
+  }
+} catch (_) {}
+
+// 9. Screen properties — tutarlı masaüstü profili
+try {
+  Object.defineProperty(screen, 'colorDepth',  { get: () => 24, configurable: true });
+  Object.defineProperty(screen, 'pixelDepth',  { get: () => 24, configurable: true });
+} catch (_) {}
+
+// 10. Permission API normalizasyonu
+// Cloudflare 'notifications' iznini kontrol eder; otomasyon ortamı hata verir
+try {
+  const _permQuery = Permissions.prototype.query;
+  Permissions.prototype.query = function (desc) {
+    if (desc && desc.name === 'notifications') {
+      return Promise.resolve({ state: 'default', onchange: null });
+    }
+    return _permQuery.call(this, desc);
+  };
 } catch (_) {}

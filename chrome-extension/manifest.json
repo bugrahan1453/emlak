@@ -10,7 +10,8 @@
     "alarms",
     "storage",
     "cookies",
-    "notifications"
+    "notifications",
+    "debugger"
   ],
 
   "host_permissions": [
