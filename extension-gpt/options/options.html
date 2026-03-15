@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <title>EmlakRadar GPT — Ayarlar</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0f1117; color: #e2e8f0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 14px; min-height: 100vh;
+    }
+    .sayfa { max-width: 560px; margin: 0 auto; padding: 32px 20px; }
+    h1 { font-size: 20px; font-weight: 700; color: #63b3ed; margin-bottom: 6px; }
+    .alt-baslik { color: #718096; font-size: 13px; margin-bottom: 28px; }
+
+    .kart {
+      background: #1a1f2e; border: 1px solid #2d3748;
+      border-radius: 10px; padding: 20px; margin-bottom: 16px;
+    }
+    .kart-baslik {
+      font-size: 12px; font-weight: 600; color: #718096;
+      text-transform: uppercase; letter-spacing: .5px; margin-bottom: 14px;
+    }
+    .form-satir { margin-bottom: 14px; }
+    label { display: block; font-size: 12px; color: #a0aec0; margin-bottom: 5px; }
+    input, select {
+      width: 100%; padding: 9px 12px; border-radius: 7px;
+      background: #0f1117; border: 1px solid #2d3748;
+      color: #e2e8f0; font-size: 13px; outline: none;
+    }
+    input:focus, select:focus { border-color: #63b3ed; }
+    .aciklama { font-size: 11px; color: #4a5568; margin-top: 4px; }
+
+    .toggle-satir {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 0; border-bottom: 1px solid #1a1f2e;
+    }
+    .toggle-satir:last-child { border-bottom: none; padding-bottom: 0; }
+    .toggle-label { font-size: 13px; color: #cbd5e0; }
+    .toggle-aciklama { font-size: 11px; color: #4a5568; margin-top: 2px; }
+    input[type=checkbox] { width: 18px; height: 18px; cursor: pointer; }
+
+    .buton-grup { display: flex; gap: 8px; margin-top: 6px; }
+    .buton {
+      padding: 9px 16px; border-radius: 7px; border: none;
+      cursor: pointer; font-size: 13px; font-weight: 600;
+    }
+    .buton-mavi   { background: #1a365d; color: #bee3f8; }
+    .buton-yesil  { background: #1c3a2a; color: #c6f6d5; }
+    .buton:hover  { opacity: .85; }
+
+    .mesaj {
+      padding: 10px 14px; border-radius: 7px; font-size: 13px;
+      margin-top: 12px; display: none;
+    }
+    .mesaj.ok    { background: #1c3a2a; color: #68d391; border: 1px solid #276749; }
+    .mesaj.hata  { background: #2d1515; color: #fc8181; border: 1px solid #742a2a; }
+  </style>
+</head>
+<body>
+<div class="sayfa">
+  <h1>EmlakRadar GPT</h1>
+  <div class="alt-baslik">GPT-4o destekli sahibinden.com çekici — Ayarlar</div>
+
+  <!-- OpenAI -->
+  <div class="kart">
+    <div class="kart-baslik">OpenAI Bağlantısı</div>
+    <div class="form-satir">
+      <label>API Anahtarı</label>
+      <input type="password" id="openai-api-key" placeholder="sk-...">
+      <div class="aciklama">platform.openai.com → API Keys sayfasından alın</div>
+    </div>
+    <div class="form-satir">
+      <label>GPT Modeli</label>
+      <select id="gpt-model">
+        <option value="gpt-4o-mini">gpt-4o-mini (hızlı, ucuz — önerilen)</option>
+        <option value="gpt-4o">gpt-4o (daha güçlü, pahalı)</option>
+      </select>
+      <div class="aciklama">gpt-4o-mini: ~$0.001/ilan · gpt-4o: ~$0.01/ilan</div>
+    </div>
+    <div class="buton-grup">
+      <button class="buton buton-yesil" id="btn-test-api">🔌 Bağlantıyı Test Et</button>
+    </div>
+    <div class="mesaj" id="mesaj-api"></div>
+  </div>
+
+  <!-- Webhook -->
+  <div class="kart">
+    <div class="kart-baslik">Site Bağlantısı (Webhook)</div>
+    <div class="form-satir">
+      <label>Webhook URL</label>
+      <input type="url" id="webhook-url" placeholder="https://siteniz.com/api/webhook.php">
+    </div>
+    <div class="form-satir">
+      <label>Webhook Secret (HMAC imzalama)</label>
+      <input type="password" id="webhook-secret" placeholder="İsteğe bağlı ama önerilir">
+    </div>
+  </div>
+
+  <!-- Davranış -->
+  <div class="kart">
+    <div class="kart-baslik">Davranış</div>
+    <div class="toggle-satir">
+      <div>
+        <div class="toggle-label">Otomatik Mod</div>
+        <div class="toggle-aciklama">Ziyaret ettiğin ilan sayfalarını otomatik kaydet</div>
+      </div>
+      <input type="checkbox" id="oto-mod" checked>
+    </div>
+    <div class="form-satir" style="margin-top:14px">
+      <label>Kuyruk Bekleme Süresi (saniye)</label>
+      <input type="number" id="delay-saniye" min="60" max="3600" value="300">
+      <div class="aciklama">Kuyruk modunda ilanlar arası bekleme. Min 60sn önerilir.</div>
+    </div>
+  </div>
+
+  <div class="buton-grup">
+    <button class="buton buton-mavi" id="btn-kaydet">💾 Kaydet</button>
+  </div>
+  <div class="mesaj" id="mesaj-kayit"></div>
+</div>
+<script src="options.js"></script>
+</body>
+</html>
