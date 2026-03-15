@@ -290,84 +290,114 @@ async function kuyruğaEkle(urlListesi) {
   return yeniler.length;
 }
 
-// ─── İlan Sayfasını Direkt Fetch Et (sekme açma) ─────────────────────────────
-async function fetchIlanIcerik(url) {
-  const res = await fetch(url, {
-    headers: {
-      'Accept':          'text/html,application/xhtml+xml',
-      'Accept-Language': 'tr-TR,tr;q=0.9,en;q=0.5',
-      'Cache-Control':   'no-cache',
-      'Referer':         'https://www.sahibinden.com/',
-    },
-    credentials: 'include',
+// ─── İlan İçeriğini Tab Açarak Çek (CORS bypass) ─────────────────────────────
+// fetch() sahibinden'in login-redirect'inde CORS hatası veriyor.
+// Bunun yerine: gizli tab aç → executeScript ile içerik çek → tab kapat
+function fetchIlanIcerik(url) {
+  return new Promise((resolve, reject) => {
+    let tabId = null;
+
+    const failTimeout = setTimeout(() => {
+      if (tabId !== null) chrome.tabs.remove(tabId).catch(() => {});
+      reject(new Error('Sayfa yükleme zaman aşımı (30sn)'));
+    }, 30000);
+
+    chrome.tabs.create({ url, active: false }, (tab) => {
+      if (chrome.runtime.lastError) {
+        clearTimeout(failTimeout);
+        return reject(new Error(chrome.runtime.lastError.message));
+      }
+      tabId = tab.id;
+
+      function onUpdated(id, info) {
+        if (id !== tabId || info.status !== 'complete') return;
+        chrome.tabs.onUpdated.removeListener(onUpdated);
+        clearTimeout(failTimeout);
+
+        chrome.scripting.executeScript({
+          target: { tabId },
+          world:  'MAIN',
+          func: () => {
+            // Giriş/challenge sayfasına redirect oldu mu?
+            const u = location.href;
+            if (u.includes('/giris') || u.includes('dogrulama') || u.includes('challenge')) {
+              return { hata: 'redirect:' + u };
+            }
+
+            // __NEXT_DATA__ (Next.js SSR) — yapısal veri
+            let nextDataStr = null;
+            const nd = document.getElementById('__NEXT_DATA__');
+            if (nd) {
+              try {
+                const parsed = JSON.parse(nd.textContent);
+                const props  = parsed?.props?.pageProps ?? parsed?.props ?? parsed;
+                nextDataStr  = JSON.stringify(props, null, 1).slice(0, 6000);
+              } catch (_) {}
+            }
+
+            // Kritik bölümler
+            const baslik   = document.querySelector('h1')?.innerText?.trim() ?? '';
+            const fiyatEl  = document.querySelector('[class*="classified-price"], [class*="price-wrapper"], [class*="fiyat"]');
+            const fiyat    = fiyatEl?.innerText?.trim() ?? '';
+            const specsEl  = document.querySelector('[class*="classified-info"], [class*="ozellik"], [class*="specs"]');
+            const specs    = specsEl?.innerText?.replace(/\s{2,}/g, ' ').trim() ?? '';
+            const descEl   = document.querySelector('[id*="description"], [class*="classified-description"]');
+            const aciklama = descEl?.innerText?.trim()?.slice(0, 1500) ?? '';
+            const bodyText = document.body.innerText.slice(0, 4000);
+
+            // Fotoğraflar
+            const fotos = new Set();
+            document.querySelectorAll('img[src], img[data-src], img[data-lazy]').forEach(img => {
+              const src = img.src || img.dataset.src || img.dataset.lazy || '';
+              if (src && /shbdn|dsmcdn|sahibinden/.test(src) &&
+                  !/logo|icon|avatar|placeholder|no.image|sprite/i.test(src)) {
+                fotos.add(src);
+              }
+            });
+
+            return {
+              nextDataStr, baslik, fiyat, specs, aciklama, bodyText,
+              fotos: [...fotos].slice(0, 20),
+            };
+          },
+        }, (results) => {
+          chrome.tabs.remove(tabId).catch(() => {});
+
+          if (chrome.runtime.lastError) {
+            return reject(new Error(chrome.runtime.lastError.message));
+          }
+
+          const d = results?.[0]?.result;
+          if (!d) return reject(new Error('executeScript sonuç döndürmedi'));
+          if (d.hata) {
+            if (d.hata.startsWith('redirect:')) {
+              return reject(new Error('Sahibinden giriş/challenge sayfasına yönlendirdi'));
+            }
+            return reject(new Error(d.hata));
+          }
+
+          const bolumler = [];
+          if (d.nextDataStr) {
+            bolumler.push('=== YAPISAL VERİ (Next.js SSR) ===');
+            bolumler.push(d.nextDataStr);
+          }
+          if (d.baslik)   bolumler.push('Başlık: '     + d.baslik);
+          if (d.fiyat)    bolumler.push('Fiyat: '      + d.fiyat);
+          if (d.specs)    bolumler.push('Özellikler: ' + d.specs);
+          if (d.aciklama) bolumler.push('Açıklama: '   + d.aciklama);
+          bolumler.push('=== SAYFA METNİ ===');
+          bolumler.push(d.bodyText);
+
+          resolve({
+            metin:      bolumler.join('\n').slice(0, 10000),
+            fotograflar: d.fotos,
+          });
+        });
+      }
+
+      chrome.tabs.onUpdated.addListener(onUpdated);
+    });
   });
-
-  if (res.status === 429) throw new Error(`HTTP 429 — Too Many Requests`);
-  if (res.status === 404) throw new Error(`HTTP 404 — İlan kaldırılmış`);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const html = await res.text();
-
-  const bolumler = [];
-
-  // 1. __NEXT_DATA__ (Next.js SSR) — en güvenilir veri kaynağı
-  // sahibinden Next.js kullanır, tüm ilan verisi bu JSON'da bulunur
-  const nextMatch = html.match(/<script[^>]*id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/i);
-  if (nextMatch) {
-    try {
-      const nd    = JSON.parse(nextMatch[1]);
-      const props = nd?.props?.pageProps ?? nd?.props ?? nd;
-      bolumler.push('=== YAPISAL VERİ (Next.js SSR) ===');
-      bolumler.push(JSON.stringify(props, null, 1).slice(0, 6000));
-    } catch (_) {}
-  }
-
-  // 2. Kritik HTML bölümleri — Next.js verisi yoksa veya eksikse
-  const temiz = html
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
-    .replace(/<style[\s\S]*?<\/style>/gi, '')
-    .replace(/<!--[\s\S]*?-->/g, '');
-
-  // Başlık
-  const h1 = temiz.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
-  if (h1) bolumler.push('Başlık: ' + h1[1].replace(/<[^>]+>/g, '').trim());
-
-  // Fiyat — sahibinden'in fiyat container class'ları
-  const fiyat = temiz.match(/class="[^"]*(?:classified-price|price-container|fiyat)[^"]*"[^>]*>([\s\S]*?)<\/(?:div|span|h\d)>/i);
-  if (fiyat) bolumler.push('Fiyat: ' + fiyat[1].replace(/<[^>]+>/g, '').trim());
-
-  // Özellikler listesi (m², oda, kat, yaş, ısıtma vb.)
-  const ozellik = temiz.match(/class="[^"]*classified-info[^"]*"[^>]*>([\s\S]*?)<\/(?:ul|div|table)>/i);
-  if (ozellik) bolumler.push('Özellikler: ' + ozellik[1].replace(/<[^>]+>/g, ' | ').replace(/\s{2,}/g, ' ').trim());
-
-  // Açıklama metni
-  const acik = temiz.match(/(?:id|class)="[^"]*(?:classified-description|description|aciklama)[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
-  if (acik) bolumler.push('Açıklama: ' + acik[1].replace(/<[^>]+>/g, ' ').replace(/\s{2,}/g, ' ').trim().slice(0, 1500));
-
-  // 3. Genel sayfa metni (fallback/ek bağlam)
-  const genelMetin = temiz
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-    .replace(/\s{3,}/g, '\n').trim()
-    .slice(0, 4000);
-  bolumler.push('=== SAYFA METNİ ===');
-  bolumler.push(genelMetin);
-
-  const metin = bolumler.join('\n').slice(0, 10000);
-
-  // Fotoğraf URL'lerini çıkar (sahibinden CDN)
-  const fotoRegex = /(?:data-src|data-lazy|data-lazy-src|data-original|content|src)="(https:\/\/[^"]*(?:shbdn|sahibinden|dsmcdn|emlakjet|hurriyetemlak|cdn)[^"]*\.(?:jpg|jpeg|png|webp)(?:\?[^"]*)?)"/gi;
-  const fotograflar = [];
-  let m;
-  while ((m = fotoRegex.exec(html)) !== null) {
-    const src = m[1];
-    if (!src.includes('placeholder') && !src.includes('no-image') &&
-        !src.includes('sprite') && !src.includes('logo') &&
-        !src.includes('icon') && !src.includes('avatar')) {
-      fotograflar.push(src);
-    }
-  }
-
-  return { metin, fotograflar: [...new Set(fotograflar)].slice(0, 20) };
 }
 
 // ─── Sahibinden Liste Sayfasından İlan URL'lerini Çıkar ──────────────────────
