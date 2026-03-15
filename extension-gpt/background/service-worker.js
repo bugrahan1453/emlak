@@ -43,7 +43,7 @@ async function imzala(body, secret) {
     .map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-// ─── GPT-4o ile Veri Çıkar ───────────────────────────────────────────────────
+// ─── GPT-4o ile Veri Çıkar (detay sayfası metni) ─────────────────────────────
 async function gptIlanParse(sayfaMetni, sayfaUrl, cfg) {
   if (!cfg.openaiApiKey) throw new Error('OpenAI API anahtarı ayarlanmamış');
 
@@ -101,6 +101,65 @@ Kurallar:
   const json = await res.json();
   const icerik = json.choices?.[0]?.message?.content || '{}';
   return JSON.parse(icerik);
+}
+
+// ─── GPT-4o ile Liste Satırlarını Yapılandır (toplu, detay sayfası yok) ───────
+async function gptListeIsleBatch(ilanlar, sayfaUrl, cfg) {
+  if (!cfg.openaiApiKey) throw new Error('OpenAI API anahtarı ayarlanmamış');
+
+  const sistem = `
+Sen bir Türk emlak ilan veri çıkarma asistanısın.
+Sana sahibinden.com arama sonuçlarından çekilmiş ham ilan listesi verilecek.
+Her ilan için aşağıdaki JSON dizisini döndür (başka hiçbir şey yazma):
+[{
+  "baslik": "",
+  "fiyat": 0,
+  "metrekare": null,
+  "oda_sayisi": null,
+  "sehir": "",
+  "ilce": null,
+  "mahalle": null,
+  "ilan_tipi": "satilik",
+  "emlak_tipi": "daire",
+  "kaynak_url": "",
+  "kaynak_id": "",
+  "fotograflar": []
+}]
+Kurallar:
+- fiyat: sadece rakam
+- ilan_tipi: başlık/URL'den çıkar: "satilik" veya "kiralik"
+- emlak_tipi: "daire", "villa", "mustakil", "arsa", "dukkan", "ofis" veya "diger"
+- konum: "Çanakkale / Biga" gibi formatı şehir+ilçe olarak ayır
+- kaynak_url ve kaynak_id değerlerini olduğu gibi koru
+`.trim();
+
+  const kullanici = `Sayfa: ${sayfaUrl}\n\nİlanlar:\n${JSON.stringify(ilanlar, null, 1).slice(0, 7000)}`;
+
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type':  'application/json',
+      'Authorization': `Bearer ${cfg.openaiApiKey}`,
+    },
+    body: JSON.stringify({
+      model:           cfg.gptModel || 'gpt-4o-mini',
+      messages:        [{ role: 'system', content: sistem }, { role: 'user', content: kullanici }],
+      response_format: { type: 'json_object' },
+      max_tokens:      3000,
+      temperature:     0,
+    }),
+  });
+
+  if (!res.ok) {
+    const hata = await res.text().catch(() => '');
+    throw new Error(`OpenAI HTTP ${res.status}: ${hata.slice(0, 200)}`);
+  }
+
+  const json  = await res.json();
+  const icerik = json.choices?.[0]?.message?.content || '{}';
+  const parsed = JSON.parse(icerik);
+  // GPT bazen { ilanlar: [...] } veya direkt [...] döner
+  return Array.isArray(parsed) ? parsed : (parsed.ilanlar || parsed.data || []);
 }
 
 // ─── Webhook'a Gönder ────────────────────────────────────────────────────────
@@ -367,7 +426,80 @@ async function handleMesaj(msg, sender) {
       return { tamam: true };
     }
 
-    // Kullanıcı liste sayfasındaydı, URL'leri kuyruğa ekle
+    // Liste sayfasından direkt veri işle — detay sayfası açma
+    case 'LISTE_DIREKT_ISLE': {
+      const ilanlar = msg.ilanlar || [];
+      if (ilanlar.length === 0) return { tamam: true, eklenen: 0 };
+      if (!cfg.openaiApiKey) {
+        await log('OpenAI API anahtarı eksik — ayarlara girin', 'hata');
+        return { tamam: false };
+      }
+      if (!cfg.webhookUrl) {
+        await log('Webhook URL eksik — ayarlara girin', 'hata');
+        return { tamam: false };
+      }
+
+      // Daha önce işlenmişleri çıkar
+      const { islenenler = [] } = await chrome.storage.local.get('islenenler');
+      const yeniIlanlar = ilanlar.filter(i => i.ilanUrl && !islenenler.includes(i.ilanUrl));
+      if (yeniIlanlar.length === 0) {
+        await log(`Bu sayfadaki tüm ilanlar zaten işlendi (${ilanlar.length} ilan)`, 'info');
+        return { tamam: true, eklenen: 0 };
+      }
+
+      await log(`${yeniIlanlar.length} yeni ilan GPT'ye gönderiliyor...`, 'info');
+
+      // 10'arlı batch'ler halinde gönder (token limiti)
+      const BATCH = 10;
+      let toplamEklenen = 0;
+      for (let i = 0; i < yeniIlanlar.length; i += BATCH) {
+        const batch = yeniIlanlar.slice(i, i + BATCH).map(il => ({
+          baslik:     il.baslik,
+          fiyat:      il.fiyat,
+          metrekare:  il.metrekare,
+          oda_sayisi: il.odaSayisi,
+          konum:      il.konum,
+          kaynak_url: il.ilanUrl,
+          kaynak_id:  il.ilanId,
+          fotograflar: il.foto ? [il.foto] : [],
+        }));
+
+        try {
+          const islenmis = await gptListeIsleBatch(batch, msg.sayfaUrl, cfg);
+          for (const ilan of islenmis) {
+            if (!ilan.baslik || !ilan.kaynak_url) continue;
+            const tamVeri = {
+              ...ilan,
+              kaynak_site: 'sahibinden',
+              tip:         ilan.ilan_tipi  || 'satilik',
+              kategori:    ilan.emlak_tipi || 'daire',
+            };
+            try {
+              const sonuc   = await webhookGonder(tamVeri, cfg);
+              const eklendi = sonuc?.data?.eklenen ?? sonuc?.eklenen ?? 0;
+              if (eklendi > 0) toplamEklenen++;
+              await islendiIsaretle(ilan.kaynak_url);
+            } catch (wErr) {
+              await log(`Webhook hatası: ${wErr.message}`, 'hata');
+            }
+          }
+        } catch (gErr) {
+          await log(`GPT batch hatası: ${gErr.message}`, 'hata');
+        }
+      }
+
+      await log(`✅ Liste işlendi: ${toplamEklenen} yeni ilan eklendi`, toplamEklenen > 0 ? 'ok' : 'info');
+      if (toplamEklenen > 0) {
+        chrome.notifications.create({
+          type: 'basic', iconUrl: 'assets/icon.png',
+          title: '✅ İlanlar Eklendi — EmlakRadar GPT',
+          message: `${toplamEklenen} yeni ilan veritabanına kaydedildi`,
+        });
+      }
+      return { tamam: true, eklenen: toplamEklenen };
+    }
+
+    // Kullanıcı liste sayfasındaydı, URL'leri kuyruğa ekle (eski mod, artık kullanılmıyor)
     case 'LISTE_KUYRUGA_EKLE': {
       const eklenen = await kuyruğaEkle(msg.urlListesi || []);
       return { tamam: true, eklenen };
