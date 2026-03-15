@@ -383,10 +383,14 @@ async function checkBotBlock(tabId) {
         const solved = await trySolveCaptcha(tabId, cfg);
         if (solved) { sendProgress('✓ CAPTCHA çözüldü, devam ediliyor', 'ok'); return false; }
       }
-      // Cloudflare JS challenge'i birkaç saniye bekleyince otomatik geçer — tekrar dene
-      await sleep(5000 + Math.random() * 3000);
-      const halaVarMi = await checkBotBlockSimple(tabId);
-      if (!halaVarMi) { sendProgress('✓ Challenge otomatik geçildi', 'ok'); return false; }
+      // Cloudflare JS challenge otomatik geçer — 3 deneme, artan bekleme süresiyle
+      const retryWaits = [8000, 12000, 15000];
+      for (let i = 0; i < retryWaits.length; i++) {
+        sendProgress(`Challenge bekleniyor (${i + 1}/3)...`, 'info');
+        await sleep(retryWaits[i] + Math.random() * 3000);
+        const halaVarMi = await checkBotBlockSimple(tabId);
+        if (!halaVarMi) { sendProgress('✓ Challenge otomatik geçildi', 'ok'); return false; }
+      }
 
       sendProgress('⚠️ Challenge geçilemedi — kullanıcı müdahalesi gerekli', 'error');
       chrome.notifications.create('challenge_failed_' + Date.now(), {

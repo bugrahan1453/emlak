@@ -29,6 +29,22 @@
     "service_worker": "background.js"
   },
 
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.sahibinden.com/*",
+        "https://secure.sahibinden.com/*",
+        "https://*.sahibinden.com/*",
+        "https://www.hepsiemlak.com/*",
+        "https://www.emlakjet.com/*"
+      ],
+      "js": ["stealth.js"],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": false
+    }
+  ],
+
   "action": {
     "default_popup": "popup/popup.html",
     "default_title": "EmlakRadar Scraper",
