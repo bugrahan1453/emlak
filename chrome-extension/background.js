@@ -496,6 +496,20 @@ let shouldStop = false;
 
 const SITE_ORDER = ['sahibinden', 'hepsiemlak', 'emlakjet'];
 
+// SW restart sonrası yarım kalan run'ı temizle
+(async function initScrapeState() {
+  const { isRunning: storedRunning, scrapeTabId } = await chrome.storage.local.get(['isRunning', 'scrapeTabId']);
+  if (storedRunning) {
+    console.log('[EmlakRadar] SW yeniden başladı, yarım kalan run temizleniyor...');
+    // Eski sekmeyi kapat
+    if (scrapeTabId) {
+      chrome.tabs.remove(scrapeTabId).catch(() => {});
+    }
+    await chrome.storage.local.set({ isRunning: false, scrapeTabId: null });
+    sendProgress('SW yeniden başladı — önceki tarama durduruldu, alarm ile devam edilecek', 'error');
+  }
+})();
+
 async function runAllScrapers(force = false) {
   if (isRunning && !force) { console.log('[EmlakRadar] Zaten çalışıyor, atlandı'); return; }
   if (isRunning && force)  { console.log('[EmlakRadar] Force, önceki tur sıfırlandı'); isRunning = false; }
@@ -519,6 +533,7 @@ async function _runAllScrapersInner(force = false) {
 
   const tab   = await createTab(jobs[0].url);
   const tabId = tab.id;
+  await chrome.storage.local.set({ scrapeTabId: tabId });
   await setRandomViewport(tabId);
   let toplamYeni = 0;
 
@@ -670,6 +685,8 @@ async function _runAllScrapersInner(force = false) {
 
               } catch (err) {
                 console.warn('[EmlakRadar] Detay hatası:', err.message);
+                sendProgress(`⚠ ${site} · webhook hatası: ${err.message.slice(0, 80)}`, 'error');
+                await logError(site, 'webhook_error', `${ilan.kaynak_url} — ${err.message}`);
               }
 
               if (shouldStop || botBan) break;
@@ -714,6 +731,7 @@ async function _runAllScrapersInner(force = false) {
     isRunning = false;
     await chrome.storage.local.set({
       isRunning:       false,
+      scrapeTabId:     null,
       lastScrapeTime:  new Date().toISOString(),
       lastScrapeCount: toplamYeni,
     });
@@ -917,10 +935,13 @@ async function sendWebhook(ilanlar, _cfg) {
     });
     if (!res.ok) {
       const txt = await res.text().catch(() => '');
-      throw new Error(`HTTP ${res.status}: ${txt.substring(0, 200)}`);
+      throw new Error(`Webhook HTTP ${res.status} (${API_URL}): ${txt.substring(0, 150)}`);
     }
     const json = await res.json().catch(() => ({}));
     console.log('[EmlakRadar] Webhook yanıtı:', json);
+    if (!json.success && json.message) {
+      throw new Error(`Webhook red: ${json.message}`);
+    }
     totalEklenen += json.data?.eklenen ?? json.eklenen ?? 0;
     totalAtilan  += json.data?.atilan  ?? json.atilan  ?? 0;
   }
