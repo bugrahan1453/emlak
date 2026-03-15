@@ -769,16 +769,19 @@ async function _runAllScrapersInner(force = false) {
                 };
 
                 const wh = await sendWebhook([full], cfg);
-                await markGoruldu([full]);
                 detailCount++;
                 if (wh.eklenen > 0) {
+                  await markGoruldu([full]);
                   toplamYeni++;
                   sendProgress(`✓ ${site} · "${ilan.baslik?.slice(0, 30)}" → siteye eklendi`, 'ok');
                   await notifyNewListings(site, 1, ilan.sehir || job.city);
                 } else if (wh.atilan > 0) {
+                  await markGoruldu([full]); // sunucuda zaten var, bir daha denemeye gerek yok
                   sendProgress(`↩ ${site} · "${ilan.baslik?.slice(0, 30)}" → zaten mevcut`);
                 } else {
-                  sendProgress(`⚠ ${site} · kaydedilemedi`, 'error');
+                  // Webhook eklemed=0 ve atilan=0 → belirsiz — seenIds'e EKLEME, tekrar denensin
+                  sendProgress(`⚠ ${site} · "${ilan.baslik?.slice(0, 30)}" → webhook yanıt belirsiz (tekrar denenecek)`, 'error');
+                  await logError(site, 'webhook_no_confirm', `eklenen=0 atilan=0 — ${ilan.kaynak_url}`);
                 }
 
               } catch (err) {
