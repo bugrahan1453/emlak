@@ -239,8 +239,13 @@ async function ilanIsle(sayfaMetni, sayfaUrl, fotograflar, cfg) {
   await log(`GPT ile işleniyor: ${sayfaUrl}`, 'info');
   await chrome.storage.local.set({ sonIslem: { url: sayfaUrl, zaman: Date.now() } });
 
-  // GPT-4o ile veri çıkar
-  const ilanVerisi = await gptIlanParse(sayfaMetni, sayfaUrl, cfg);
+  // Önce gpt-4o-mini dene, başlık çıkaramazsa gpt-4o ile tekrar dene
+  let ilanVerisi = await gptIlanParse(sayfaMetni, sayfaUrl, cfg);
+
+  if (!ilanVerisi.baslik && (cfg.gptModel || 'gpt-4o-mini') !== 'gpt-4o') {
+    await log(`gpt-4o-mini başarısız, gpt-4o ile tekrar deneniyor: ${sayfaUrl.split('/').slice(-2).join('/')}`, 'info');
+    ilanVerisi = await gptIlanParse(sayfaMetni, sayfaUrl, { ...cfg, gptModel: 'gpt-4o' });
+  }
 
   if (!ilanVerisi.baslik) {
     await log(`GPT veri çıkaramadı: ${sayfaUrl}`, 'hata');
