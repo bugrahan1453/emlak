@@ -77,6 +77,32 @@ async function ensureAlarms() {
 }
 ensureAlarms();
 
+// ─── Stealth Content Script Kaydı (document_start + MAIN world) ───────────────
+async function registerStealthScript() {
+  try {
+    const existing = await chrome.scripting.getRegisteredContentScripts({ ids: ['emlakradar-stealth'] });
+    if (existing.length === 0) {
+      await chrome.scripting.registerContentScripts([{
+        id:      'emlakradar-stealth',
+        matches: [
+          'https://www.sahibinden.com/*',
+          'https://secure.sahibinden.com/*',
+          'https://*.sahibinden.com/*',
+          'https://www.hepsiemlak.com/*',
+          'https://www.emlakjet.com/*',
+        ],
+        js:      ['stealth.js'],
+        runAt:   'document_start',
+        world:   'MAIN',
+      }]);
+      console.log('[EmlakRadar] Stealth script kayıt edildi (document_start + MAIN)');
+    }
+  } catch (e) {
+    console.warn('[EmlakRadar] Stealth script kayıt hatası:', e.message);
+  }
+}
+registerStealthScript();
+
 // ─── Rastgele Gecikmeli Tek Seferlik Alarm Planlama ───────────────────────────
 async function scheduleNextScrape() {
   const cfg = await getConfig();
@@ -604,7 +630,7 @@ async function _runAllScrapersInner(force = false) {
   await chrome.storage.local.set({ isRunning: true, lastError: '' });
 
   const cities     = cfg.cities.split(',').map(c => c.trim().toLowerCase()).filter(Boolean);
-  const jobs       = buildJobs(cities, MAX_PAGES);
+  const jobs       = await buildJobs(cities, MAX_PAGES);
   const gunAraligi = cfg.gunAraligi ?? 0;
 
   console.log(`[EmlakRadar] Başladı — ${cities.join(', ')}`);
@@ -855,46 +881,66 @@ async function _runAllScrapersInner(force = false) {
   }
 }
 
-// ─── Job Listesi ──────────────────────────────────────────────────────────────
-function buildJobs(cities, maxPages) {
-  const jobs = [];
-  for (const city of cities) {
-    // Sahibinden
-    for (const k of [
-      { slug: 'satilik-daire',       tip: 'satilik', kategori: 'daire' },
-      { slug: 'kiralik-daire',       tip: 'kiralik', kategori: 'daire' },
-      { slug: 'satilik-arsa',        tip: 'satilik', kategori: 'arsa' },
-      { slug: 'satilik-mustakil-ev', tip: 'satilik', kategori: 'mustakil' },
-      { slug: 'satilik-villa',       tip: 'satilik', kategori: 'villa' },
-    ]) {
-      const yol = city === 'istanbul' ? `/${k.slug}` : `/${k.slug}/${city}`;
-      jobs.push({ site: 'sahibinden', url: `https://www.sahibinden.com${yol}`, ...k, city, maxPages });
-    }
-    // Hepsiemlak
-    for (const k of [
-      { slug: `${city}-satilik/daire`, tip: 'satilik', kategori: 'daire' },
-      { slug: `${city}-kiralik/daire`, tip: 'kiralik', kategori: 'daire' },
-      { slug: `${city}-satilik/arsa`,  tip: 'satilik', kategori: 'arsa' },
-    ]) {
-      jobs.push({ site: 'hepsiemlak', url: `https://www.hepsiemlak.com/${k.slug}`, ...k, city, maxPages });
-    }
-    // Emlakjet
-    for (const k of [
-      { slug: 'satilik-daire', tip: 'satilik', kategori: 'daire' },
-      { slug: 'kiralik-daire', tip: 'kiralik', kategori: 'daire' },
-      { slug: 'satilik-arsa',  tip: 'satilik', kategori: 'arsa' },
-    ]) {
-      jobs.push({ site: 'emlakjet', url: `https://www.emlakjet.com/${k.slug}/${city}/`, ...k, city, maxPages });
+// ─── Job Listesi — Kategori Rotasyonu ────────────────────────────────────────
+// Her çalıştırmada 1 kategori/site seçilir, tüm kategoriler sırayla döner.
+// Session başına 3 kategori = daha doğal davranış (önceki 11 yerine).
+const ALL_CATS = {
+  sahibinden: [
+    { slug: 'satilik-daire',       tip: 'satilik', kategori: 'daire'    },
+    { slug: 'kiralik-daire',       tip: 'kiralik', kategori: 'daire'    },
+    { slug: 'satilik-arsa',        tip: 'satilik', kategori: 'arsa'     },
+    { slug: 'satilik-mustakil-ev', tip: 'satilik', kategori: 'mustakil' },
+    { slug: 'satilik-villa',       tip: 'satilik', kategori: 'villa'    },
+  ],
+  hepsiemlak: [
+    { slug: '{city}-satilik/daire', tip: 'satilik', kategori: 'daire' },
+    { slug: '{city}-kiralik/daire', tip: 'kiralik', kategori: 'daire' },
+    { slug: '{city}-satilik/arsa',  tip: 'satilik', kategori: 'arsa'  },
+  ],
+  emlakjet: [
+    { slug: 'satilik-daire', tip: 'satilik', kategori: 'daire' },
+    { slug: 'kiralik-daire', tip: 'kiralik', kategori: 'daire' },
+    { slug: 'satilik-arsa',  tip: 'satilik', kategori: 'arsa'  },
+  ],
+};
+
+async function buildJobs(cities, maxPages) {
+  const { catRotIdx = {} } = await chrome.storage.local.get(['catRotIdx']);
+  const newIdx = { ...catRotIdx };
+  const jobs   = [];
+
+  for (const site of ['sahibinden', 'hepsiemlak', 'emlakjet']) {
+    const cats    = ALL_CATS[site];
+    const prevIdx = catRotIdx[site] ?? (cats.length - 1);
+    const idx     = (prevIdx + 1) % cats.length;
+    newIdx[site]  = idx;
+    const k = cats[idx];
+
+    for (const city of cities) {
+      let url;
+      if (site === 'sahibinden') {
+        const yol = city === 'istanbul' ? `/${k.slug}` : `/${k.slug}/${city}`;
+        url = `https://www.sahibinden.com${yol}`;
+      } else if (site === 'hepsiemlak') {
+        url = `https://www.hepsiemlak.com/${k.slug.replace('{city}', city)}`;
+      } else {
+        url = `https://www.emlakjet.com/${k.slug}/${city}/`;
+      }
+      jobs.push({ site, url, ...k, city, maxPages });
     }
   }
+
+  await chrome.storage.local.set({ catRotIdx: newIdx });
   return jobs;
 }
 
 // ─── Sekme Yardımcıları ───────────────────────────────────────────────────────
 async function setRandomViewport(tabId) {
   const sizes = [
-    { w: 1280, h: 720 }, { w: 1366, h: 768 }, { w: 1440, h: 900 },
-    { w: 1536, h: 864 }, { w: 1600, h: 900 }, { w: 1920, h: 1080 },
+    { w: 1280, h: 720  }, { w: 1280, h: 800  }, { w: 1280, h: 1024 },
+    { w: 1366, h: 768  }, { w: 1440, h: 900  }, { w: 1536, h: 864  },
+    { w: 1600, h: 900  }, { w: 1600, h: 1024 }, { w: 1920, h: 1080 },
+    { w: 1024, h: 768  }, { w: 1152, h: 864  }, { w: 1360, h: 768  },
   ];
   const { w, h } = sizes[Math.floor(Math.random() * sizes.length)];
   try {
@@ -905,7 +951,7 @@ async function setRandomViewport(tabId) {
 
 function createTab(url, timeoutMs = 45000) {
   return new Promise((resolve, reject) => {
-    chrome.tabs.create({ url, active: true }, tab => {
+    chrome.tabs.create({ url, active: false }, tab => {
       if (chrome.runtime.lastError) { reject(new Error(chrome.runtime.lastError.message)); return; }
       const timer = setTimeout(() => {
         chrome.tabs.onUpdated.removeListener(onUpdated);
@@ -1237,6 +1283,8 @@ async function sahibindenScript(tip, kategori, city) {
     return;
   }
 
+  // Okuma duraklaması: gerçek kullanıcı gibi sayfaya bakar, hemen scroll yapmaz
+  await new Promise(r => setTimeout(r, 1200 + Math.random() * 2500));
   await humanScroll();
 
   const ilanlar = [];
@@ -1330,6 +1378,8 @@ async function hepsiemlakScript(tip, kategori, city) {
   }
 
   await waitFor(SEL);
+  // Okuma duraklaması
+  await new Promise(r => setTimeout(r, 1000 + Math.random() * 2000));
   await humanScroll();
 
   const ilanlar = [];
@@ -1417,6 +1467,8 @@ async function emlakjetScript(tip, kategori, city) {
   }
 
   await waitFor();
+  // Okuma duraklaması
+  await new Promise(r => setTimeout(r, 900 + Math.random() * 2200));
   await humanScroll();
 
   const ilanlar = [];
