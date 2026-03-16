@@ -61,53 +61,8 @@ function gaussianDelay(min, max) {
   return Math.floor(min + n * (max - min));
 }
 
-// ─── Fare Simülasyonu (executeScript / MAIN world) ───────────────────────────
-// Not: chrome.debugger kullanmıyoruz — debugger attach banner'ı sahibinden
-// tarafından yan etkilerle tespit edilir (debugger; statement tetikleme,
-// timer precision değişimi). Bunun yerine executeScript ile synthetic event.
-async function simulateMouse(tabId, durationMs = 3000) {
-  const endTs = Date.now() + durationMs;
-  let cx = 300 + Math.floor(Math.random() * 700);
-  let cy = 200 + Math.floor(Math.random() * 350);
-
-  while (Date.now() < endTs) {
-    const tx = 80  + Math.floor(Math.random() * 1100);
-    const ty = 60  + Math.floor(Math.random() * 560);
-
-    // Kübik Bezier ile adım adım ilerleme
-    const steps = 10 + Math.floor(Math.random() * 10);
-    for (let i = 1; i <= steps && Date.now() < endTs; i++) {
-      const t = i / steps;
-      const mt = 1 - t;
-      // Basit quadratic (control point ortası)
-      const mx = mt*mt*cx + 2*mt*t*((cx+tx)/2 + (Math.random()-0.5)*60) + t*t*tx;
-      const my = mt*mt*cy + 2*mt*t*((cy+ty)/2 + (Math.random()-0.5)*40) + t*t*ty;
-
-      await chrome.scripting.executeScript({
-        target: { tabId },
-        world: 'MAIN',
-        func: (x, y) => {
-          document.dispatchEvent(new MouseEvent('mousemove', {
-            bubbles: true, cancelable: true,
-            clientX: x, clientY: y, screenX: x + 96, screenY: y + 140,
-            movementX: x - (window.__emlakPrevX || x), movementY: y - (window.__emlakPrevY || y),
-          }));
-          window.__emlakPrevX = x; window.__emlakPrevY = y;
-        },
-        args: [Math.round(mx), Math.round(my)],
-      }).catch(() => {});
-
-      const ease = 0.4 + Math.sin(t * Math.PI) * 0.7;
-      await sleep(Math.round((8 + Math.random() * 20) / ease));
-    }
-
-    // Duraklama: %30 ihtimalle uzun (okuma simülasyonu)
-    if (Math.random() < 0.3) await sleep(600 + Math.random() * 1600);
-    else                      await sleep(40  + Math.random() * 160);
-
-    cx = tx; cy = ty;
-  }
-}
+// simulateMouse kaldırıldı: isTrusted=false olan sentetik event'ler
+// Cloudflare tarafından tespit edilir. Doğal scroll + bekleme yeterli.
 
 // Service worker uyanık tut — 25sn'de bir ping (Chrome resmi yöntemi)
 function waitUntil(promise) {
@@ -125,31 +80,8 @@ async function ensureAlarms() {
 }
 ensureAlarms();
 
-// ─── Stealth Content Script Kaydı (document_start + MAIN world) ───────────────
-async function registerStealthScript() {
-  try {
-    const existing = await chrome.scripting.getRegisteredContentScripts({ ids: ['emlakradar-stealth'] });
-    if (existing.length === 0) {
-      await chrome.scripting.registerContentScripts([{
-        id:      'emlakradar-stealth',
-        matches: [
-          'https://www.sahibinden.com/*',
-          'https://secure.sahibinden.com/*',
-          'https://*.sahibinden.com/*',
-          'https://www.hepsiemlak.com/*',
-          'https://www.emlakjet.com/*',
-        ],
-        js:      ['stealth.js'],
-        runAt:   'document_start',
-        world:   'MAIN',
-      }]);
-      console.log('[EmlakRadar] Stealth script kayıt edildi (document_start + MAIN)');
-    }
-  } catch (e) {
-    console.warn('[EmlakRadar] Stealth script kayıt hatası:', e.message);
-  }
-}
-registerStealthScript();
+// registerStealthScript kaldırıldı: manifest.json content_scripts kaydı yeterli.
+// Duplicate kayıt SW restart sonrası race condition yaratıyordu.
 
 // ─── Rastgele Gecikmeli Tek Seferlik Alarm Planlama ───────────────────────────
 async function scheduleNextScrape() {
@@ -681,6 +613,13 @@ async function _runAllScrapersInner(force = false) {
   isRunning = true;
   await chrome.storage.local.set({ isRunning: true, lastError: '' });
 
+  const MAX_DETAILS_PER_SITE = {
+    sahibinden: 12, // Sahibinden için sıkı limit
+    hepsiemlak: 25,
+    emlakjet:   25,
+  };
+  const siteDetailCount = { sahibinden: 0, hepsiemlak: 0, emlakjet: 0 };
+
   const cities     = cfg.cities.split(',').map(c => c.trim().toLowerCase()).filter(Boolean);
   const jobs       = await buildJobs(cities, MAX_PAGES);
   const gunAraligi = cfg.gunAraligi ?? 0;
@@ -717,10 +656,8 @@ async function _runAllScrapersInner(force = false) {
         await navigateTab(tabId, homeUrls[site]);
       }
       isFirstSiteTab = false;
-      await hideWebdriver(tabId);
-      // Ana sayfada fare hareketi — gerçek kullanıcı gibi geziniyor
-      await simulateMouse(tabId, gaussianDelay(2500, 4500));
-      await sleep(gaussianDelay(1500, 3000));
+      // Ana sayfada doğal bekleme (stealth.js scroll yeterli)
+      await sleep(gaussianDelay(3000, 6000));
       if (await checkBotBlock(tabId)) {
         sendProgress(`⚠️ ${site} ana sayfa bot bloğu — site atlanıyor`, 'error');
         await logError(site, 'bot_block_home', `Ana sayfa bot bloğu`, { url: homeUrls[site] });
@@ -740,10 +677,8 @@ async function _runAllScrapersInner(force = false) {
             sendProgress(`${site} · ${job.kategori} · sayfa ${page} — liste tarıyor...`);
 
             await navigateTab(tabId, nextUrl);
-            await hideWebdriver(tabId);
-            // Liste sayfasında fare hareketi + bekleme (Cloudflare challenge geçişi)
-            await simulateMouse(tabId, gaussianDelay(3000, 5500));
-            await sleep(gaussianDelay(1000, 2500));
+            // Liste sayfasında doğal bekleme (Cloudflare challenge geçişi)
+            await sleep(gaussianDelay(3500, 7000));
 
             if (await checkBotBlock(tabId)) {
               const botMsg = `Bot bloğu/Cloudflare — sayfa atlandı: ${nextUrl}`;
@@ -794,15 +729,21 @@ async function _runAllScrapersInner(force = false) {
 
             for (let i = 0; i < yeniler.length; i++) {
               if (shouldStop || siteBanned) break;
+
+              // Session detay limiti kontrolü
+              const siteMax = MAX_DETAILS_PER_SITE[site] || 25;
+              if (siteDetailCount[site] >= siteMax) {
+                sendProgress(`${site}: session limiti (${siteMax}) doldu — kalan ilanlar sonraki tura`, 'info');
+                break;
+              }
+
               const ilan = yeniler[i];
               sendProgress(`${site} · ilan ${i + 1}/${yeniler.length}: ${ilan.baslik?.slice(0, 35)}...`);
 
               try {
-                await navigateTab(tabId, ilan.kaynak_url);
-                await hideWebdriver(tabId);
-                // Detay sayfasında fare hareketi — gerçek okuma davranışı
-                await simulateMouse(tabId, gaussianDelay(2500, 4500));
-                await sleep(gaussianDelay(800, 2000));
+                await navigateViaClick(tabId, ilan.kaynak_url);
+                // Detay sayfasında doğal bekleme — gerçek okuma davranışı
+                await sleep(gaussianDelay(3000, 6000));
 
                 // 404 / süresi dolmuş ilan kontrolü — ban tetiklemez, atla
                 const pageState = await chrome.scripting.executeScript({
@@ -851,6 +792,7 @@ async function _runAllScrapersInner(force = false) {
 
                 const wh = await sendWebhook([full], cfg);
                 detailCount++;
+                siteDetailCount[site]++;
                 if (wh.eklenen > 0) {
                   await markGoruldu([full]);
                   toplamYeni++;
@@ -873,8 +815,9 @@ async function _runAllScrapersInner(force = false) {
 
               if (shouldStop || siteBanned) break;
 
-              // ── Her 8 ilandan sonra mola — daha doğal davranış ──
-              if (detailCount > 0 && detailCount % 8 === 0) {
+              // ── Her 5-10 ilandan sonra mola — sabit 8 yerine rastgele ──
+              const molaAraligi = 5 + Math.floor(Math.random() * 6); // 5-10
+              if (detailCount > 0 && detailCount % molaAraligi === 0) {
                 const molaSure = 120000 + Math.random() * 120000; // 2-4 dakika
                 sendProgress(`${site}: ${detailCount} ilan çekildi — ${Math.round(molaSure/60000)}dk mola...`);
                 const r = Math.random();
@@ -892,21 +835,36 @@ async function _runAllScrapersInner(force = false) {
                 }
               }
 
-              // ── Detaylar arası: goBack ile listeye dön ──
+              // ── Detaylar arası: çeşitlendirilmiş geri dönüş davranışı ──
               if (!shouldStop && !siteBanned && i < yeniler.length - 1) {
-                const bekle = 90000 + Math.random() * 60000; // 1.5-2.5 dakika
-                sendProgress(`${site}: listeye geri dönüyor (${Math.round(bekle/1000)}sn sonra devam)...`);
-                await goBackOrNavigate(tabId, listSayfasi);
-                await sleep(bekle);
+                const r = Math.random();
+                if (r < 0.5) {
+                  // %50: goBack ile geri dön (normal kullanıcı davranışı)
+                  const bekle = gaussianDelay(60000, 150000); // 1-2.5 dakika
+                  sendProgress(`${site}: listeye geri dönüyor (${Math.round(bekle/1000)}sn)...`);
+                  await goBackOrNavigate(tabId, listSayfasi);
+                  await sleep(bekle);
+                } else if (r < 0.8) {
+                  // %30: Doğrudan bir sonraki detaya git (navigateViaClick bir sonraki iterasyonda çağrılacak)
+                  const bekle = gaussianDelay(45000, 120000); // 45sn-2dk
+                  sendProgress(`${site}: sonraki ilana geçiyor (${Math.round(bekle/1000)}sn)...`);
+                  await sleep(bekle);
+                } else {
+                  // %20: Liste sayfasına navigateTab ile git
+                  const bekle = gaussianDelay(90000, 180000); // 1.5-3 dakika
+                  sendProgress(`${site}: listeye geri dönüyor (${Math.round(bekle/1000)}sn)...`);
+                  await navigateTab(tabId, listSayfasi);
+                  await sleep(bekle);
+                }
               }
             }
 
-            // Sayfalar arası bekleme
-            if (nextUrl && !shouldStop) await sleep(20000 + Math.random() * 20000); // 20-40sn
+            // Sayfalar arası bekleme — 30-60sn
+            if (nextUrl && !shouldStop) await sleep(gaussianDelay(30000, 60000));
           }
 
-          // Kategoriler arası bekleme
-          if (!shouldStop) await sleep(45000 + Math.random() * 45000); // 45-90sn
+          // Kategoriler arası bekleme — 1-2dk
+          if (!shouldStop) await sleep(gaussianDelay(60000, 120000));
         }
 
       } catch (err) {
@@ -981,7 +939,8 @@ async function buildJobs(cities, maxPages) {
       } else {
         url = `https://www.emlakjet.com/${k.slug}/${city}/`;
       }
-      jobs.push({ site, url, ...k, city, maxPages });
+      const siteMaxPages = site === 'sahibinden' ? Math.min(maxPages, 3) : maxPages;
+      jobs.push({ site, url, ...k, city, maxPages: siteMaxPages });
     }
   }
 
@@ -992,12 +951,24 @@ async function buildJobs(cities, maxPages) {
 // ─── Sekme Yardımcıları ───────────────────────────────────────────────────────
 async function setRandomViewport(tabId) {
   const sizes = [
-    { w: 1280, h: 720  }, { w: 1280, h: 800  }, { w: 1280, h: 1024 },
+    { w: 1280, h: 720  }, { w: 1280, h: 800  },
     { w: 1366, h: 768  }, { w: 1440, h: 900  }, { w: 1536, h: 864  },
-    { w: 1600, h: 900  }, { w: 1600, h: 1024 }, { w: 1920, h: 1080 },
-    { w: 1024, h: 768  }, { w: 1152, h: 864  }, { w: 1360, h: 768  },
+    { w: 1920, h: 1080 },
   ];
-  const { w, h } = sizes[Math.floor(Math.random() * sizes.length)];
+
+  // Günlük bir kez viewport değiştir, gün içinde sabit tut
+  const today = new Date().toISOString().slice(0, 10); // 'YYYY-MM-DD'
+  const { viewportDate, viewportIdx } = await chrome.storage.local.get(['viewportDate', 'viewportIdx']);
+
+  let idx;
+  if (viewportDate === today && viewportIdx != null) {
+    idx = viewportIdx;
+  } else {
+    idx = Math.floor(Math.random() * sizes.length);
+    await chrome.storage.local.set({ viewportDate: today, viewportIdx: idx });
+  }
+
+  const { w, h } = sizes[idx];
   try {
     const tab = await chrome.tabs.get(tabId);
     await chrome.windows.update(tab.windowId, { width: w, height: h });
@@ -1042,16 +1013,54 @@ function navigateTab(tabId, url, timeoutMs = 45000) {
   });
 }
 
-// ─── navigator.webdriver Gizle (MAIN world) ───────────────────────────────────
-async function hideWebdriver(tabId) {
-  await chrome.scripting.executeScript({
-    target: { tabId }, world: 'MAIN',
-    func: () => {
-      try {
-        Object.defineProperty(navigator, 'webdriver', { get: () => undefined, configurable: true });
-      } catch (_) {}
-    },
-  }).catch(() => {});
+// hideWebdriver kaldırıldı: stealth.js document_start + MAIN world'de
+// navigator.webdriver'ı override ediyor, runtime'da tekrar gerekmez.
+
+// ─── Referrer-korumalı Navigasyon ────────────────────────────────────────────
+// Sayfadaki link'e tıklama simülasyonu — doğal Referer header üretir
+async function navigateViaClick(tabId, targetUrl, timeoutMs = 45000) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      resolve(); // Timeout = devam et
+    }, timeoutMs);
+
+    function onUpdated(updatedId, info) {
+      if (updatedId !== tabId || info.status !== 'complete') return;
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      clearTimeout(timer);
+      resolve();
+    }
+    chrome.tabs.onUpdated.addListener(onUpdated);
+
+    chrome.scripting.executeScript({
+      target: { tabId },
+      world: 'MAIN',
+      func: (url) => {
+        // Sayfadaki tüm <a> etiketlerini tara, href'i eşleşeni bul
+        const allLinks = document.querySelectorAll('a[href]');
+        let found = null;
+        const pathname = new URL(url).pathname;
+        for (const a of allLinks) {
+          const h = a.getAttribute('href') || '';
+          if (h === url || h.endsWith(pathname)) {
+            found = a;
+            break;
+          }
+        }
+        if (found) {
+          found.click(); // Doğal click → doğal Referer
+        } else {
+          // Link bulunamadıysa location.href ile git — bu da Referer üretir
+          window.location.href = url;
+        }
+      },
+      args: [targetUrl],
+    }).catch(() => {
+      // executeScript başarısızsa fallback: eski yöntem
+      chrome.tabs.update(tabId, { url: targetUrl });
+    });
+  });
 }
 
 // ─── Geri Git veya Navigasyon (goBack başarısızsa fallback) ──────────────────
@@ -1061,11 +1070,11 @@ async function goBackOrNavigate(tabId, fallbackUrl) {
     new Promise(resolve => {
       chrome.tabs.goBack(tabId, () => {
         if (chrome.runtime.lastError) { resolve(); return; }
-        // onUpdated veya 5 sn timeout bekle
+        // onUpdated veya 8 sn timeout bekle
         const timer = setTimeout(() => {
           chrome.tabs.onUpdated.removeListener(onUp);
           resolve();
-        }, 5000);
+        }, 8000);
         function onUp(id, info) {
           if (id !== tabId || info.status !== 'complete') return;
           chrome.tabs.onUpdated.removeListener(onUp);
@@ -1076,7 +1085,7 @@ async function goBackOrNavigate(tabId, fallbackUrl) {
         chrome.tabs.onUpdated.addListener(onUp);
       });
     }),
-    sleep(8000),
+    sleep(12000),
   ]);
   // goBack başarısız olduysa (resolved=false ve hata) fallback
   if (!resolved) {
@@ -1339,7 +1348,7 @@ async function sahibindenScript(tip, kategori, city) {
   }
 
   // Okuma duraklaması: gerçek kullanıcı gibi sayfaya bakar, hemen scroll yapmaz
-  await new Promise(r => setTimeout(r, 1200 + Math.random() * 2500));
+  await new Promise(r => setTimeout(r, 2000 + Math.random() * 4000));
   await humanScroll();
 
   const ilanlar = [];
@@ -1434,7 +1443,7 @@ async function hepsiemlakScript(tip, kategori, city) {
 
   await waitFor(SEL);
   // Okuma duraklaması
-  await new Promise(r => setTimeout(r, 1000 + Math.random() * 2000));
+  await new Promise(r => setTimeout(r, 2000 + Math.random() * 3500));
   await humanScroll();
 
   const ilanlar = [];
@@ -1523,7 +1532,7 @@ async function emlakjetScript(tip, kategori, city) {
 
   await waitFor();
   // Okuma duraklaması
-  await new Promise(r => setTimeout(r, 900 + Math.random() * 2200));
+  await new Promise(r => setTimeout(r, 1800 + Math.random() * 3500));
   await humanScroll();
 
   const ilanlar = [];
@@ -1624,7 +1633,7 @@ async function sahibindenDetailScript() {
 
   // ─── Sayfa yüklensin ────────────────────────────────────────────────────────
   await waitFor('h1.classifiedDetailTitle, h1[class*="title"], .classifiedDetailMainPhoto', 25000);
-  await new Promise(r => setTimeout(r, 1500)); // JS render tamamlansın
+  await new Promise(r => setTimeout(r, 2000 + Math.random() * 2000)); // JS render tamamlansın
 
   // Lazy load + gerçekçi scroll
   await humanScroll();
@@ -1808,7 +1817,7 @@ async function hepsiemlakDetailScript() {
   }
 
   await waitFor();
-  await new Promise(r => setTimeout(r, 1500));
+  await new Promise(r => setTimeout(r, 2000 + Math.random() * 2000));
   await humanScroll();
   await new Promise(r => setTimeout(r, 500));
 
@@ -1897,7 +1906,7 @@ async function emlakjetDetailScript() {
   }
 
   await waitFor();
-  await new Promise(r => setTimeout(r, 1500));
+  await new Promise(r => setTimeout(r, 2000 + Math.random() * 2000));
   await humanScroll();
   await new Promise(r => setTimeout(r, 500));
 
