@@ -233,15 +233,44 @@ require_once APP_DIR . '/views/layout/header.php';
                 <h2 class="text-base font-semibold mb-4" style="color: #e8ecf4;"><?= e($ilan['baslik']) ?></h2>
 
                 <div class="space-y-2 text-sm">
-                    <?php $bilgiler = [
+                    <?php
+                    // m² fiyat hesapla
+                    $m2Fiyat = ($ilan['m2_fiyat'] > 0) ? $ilan['m2_fiyat'] : (($ilan['metrekare'] > 0 && $ilan['fiyat'] > 0) ? round($ilan['fiyat'] / $ilan['metrekare'], 2) : null);
+
+                    // İlan ömrü hesapla
+                    $ilanOmru = null;
+                    if ($ilan['created_at']) {
+                        $fark = (new DateTime())->diff(new DateTime($ilan['created_at']));
+                        if ($fark->days == 0) $ilanOmru = 'Bugün';
+                        elseif ($fark->days == 1) $ilanOmru = '1 gün';
+                        elseif ($fark->days < 30) $ilanOmru = $fark->days . ' gün';
+                        elseif ($fark->days < 365) $ilanOmru = floor($fark->days / 30) . ' ay ' . ($fark->days % 30) . ' gün';
+                        else $ilanOmru = floor($fark->days / 365) . ' yıl ' . floor(($fark->days % 365) / 30) . ' ay';
+                    }
+
+                    // Son görünme durumu
+                    $sonGorunme = null;
+                    if ($ilan['son_gorunme']) {
+                        $sgFark = (new DateTime())->diff(new DateTime($ilan['son_gorunme']));
+                        if ($sgFark->days == 0) $sonGorunme = 'Bugün';
+                        elseif ($sgFark->days == 1) $sonGorunme = 'Dün';
+                        elseif ($sgFark->days < 7) $sonGorunme = $sgFark->days . ' gün önce';
+                        else $sonGorunme = formatTarih($ilan['son_gorunme'], 'd.m.Y');
+                    }
+
+                    $bilgiler = [
                         ['📍', 'Konum', implode(' / ', array_filter([$ilan['sehir'], $ilan['ilce'], $ilan['mahalle']]))],
                         ['📐', 'Metrekare', ($ilan['metrekare'] ? $ilan['metrekare'] . ' m²' : null)],
+                        ['💰', 'm² Fiyat', ($m2Fiyat ? number_format($m2Fiyat, 0, ',', '.') . ' ₺/m²' : null)],
                         ['🚪', 'Oda Sayısı', $ilan['oda_sayisi']],
                         ['🏢', 'Kat', $ilan['kat']],
                         ['🏗️', 'Bina Yaşı', ($ilan['bina_yasi'] ? $ilan['bina_yasi'] . ' yıl' : null)],
                         ['🔥', 'Isıtma', $ilan['isitma_tipi']],
                         ['🪑', 'Eşya Durumu', $ilan['esya_durumu']],
                         ['📅', 'Eklenme', formatTarih($ilan['created_at'], 'd.m.Y')],
+                        ['⏱️', 'İlan Ömrü', $ilanOmru],
+                        ['👁️', 'Son Görülme', $sonGorunme],
+                        ['📊', 'Fiyat Değişimi', ($ilan['fiyat_degisim_sayisi'] > 0 ? $ilan['fiyat_degisim_sayisi'] . ' kez' : null)],
                         ['👁️', 'Görüntülenme', $ilan['goruntulenme']],
                     ]; ?>
                     <?php foreach ($bilgiler as [$ikon, $etiket, $deger]): if (!$deger) continue; ?>
