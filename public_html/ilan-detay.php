@@ -42,13 +42,15 @@ $fotoUrl = function(string $f): string {
         ? APP_URL . '/api/img-proxy.php?url=' . urlencode($f)
         : APP_URL . '/uploads/fotograflar/' . basename($f);
 };
+$fotoUrlsJson = json_encode(array_values(array_map($fotoUrl, $fotograflar)), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 ?>
+<script>window.__fotoUrls = <?= $fotoUrlsJson ?>;</script>
 <main class="flex-1 p-4 lg:p-6 pb-20 lg:pb-6"
       x-data="{
           aktifFoto: 0, modalAcik: false, silOnay: false,
           aiYukleniyor: {}, aiSonuc: {},
           sesliNotAcik: false,
-          fotoUrls: <?= json_encode(array_values(array_map($fotoUrl, $fotograflar)), JSON_UNESCAPED_UNICODE) ?>
+          fotoUrls: window.__fotoUrls || []
       }">
 
     <!-- Breadcrumb + Kaynak Link -->
