@@ -90,35 +90,54 @@ function ilanDetayData() {
             <!-- Fotoğraf Galerisi -->
             <?php if (!empty($fotograflar)): ?>
             <div class="rounded-2xl overflow-hidden" style="background: rgba(15,23,62,0.6); border: 1px solid rgba(255,255,255,0.06);">
-                <!-- Ana foto: doğal boyut, sıfır kırpma -->
-                <div class="relative cursor-pointer" style="background:#000;" @click="modalAcik = true">
-                    <img :src="fotoUrls[aktifFoto]"
+                <!-- Ana foto -->
+                <div class="relative cursor-pointer" style="background:#000;" id="anaFotoWrap">
+                    <img id="anaFoto" src="<?= $fotoUrl($fotograflar[0]) ?>"
                          class="w-full block"
-                         style="max-height:80vh; object-fit:contain;"
-                         loading="lazy">
+                         style="max-height:80vh; object-fit:contain;">
                     <div class="absolute bottom-3 right-3 text-xs px-2 py-1 rounded-full"
                          style="background: rgba(0,0,0,0.6); color: white;">
-                        <span x-text="aktifFoto + 1"></span>/<?= count($fotograflar) ?>
+                        <span id="fotoSayac">1</span>/<?= count($fotograflar) ?>
                     </div>
                     <div class="absolute inset-0 flex items-center justify-between px-3 opacity-0 hover:opacity-100 transition-opacity">
-                        <button @click.stop="aktifFoto = aktifFoto > 0 ? aktifFoto-1 : <?= count($fotograflar)-1 ?>"
+                        <button onclick="event.stopPropagation(); fotoGecis(-1);"
                                 class="w-8 h-8 rounded-full flex items-center justify-center text-white"
                                 style="background: rgba(0,0,0,0.5);">‹</button>
-                        <button @click.stop="aktifFoto = aktifFoto < <?= count($fotograflar)-1 ?> ? aktifFoto+1 : 0"
+                        <button onclick="event.stopPropagation(); fotoGecis(1);"
                                 class="w-8 h-8 rounded-full flex items-center justify-center text-white"
                                 style="background: rgba(0,0,0,0.5);">›</button>
                     </div>
                 </div>
-                <div class="flex gap-2 p-3 overflow-x-auto">
+                <div class="flex gap-2 p-3 overflow-x-auto" id="thumbStrip">
                     <?php foreach ($fotograflar as $fi => $foto): ?>
                     <img src="<?= $fotoUrl($foto) ?>"
-                         @click="aktifFoto = <?= $fi ?>"
-                         :class="aktifFoto === <?= $fi ?> ? 'ring-2 ring-cyan-400 opacity-100' : 'opacity-50 hover:opacity-80'"
-                         class="w-16 h-12 rounded-lg object-cover cursor-pointer flex-shrink-0 transition-all"
+                         onclick="fotoSec(<?= $fi ?>)"
+                         class="w-16 h-12 rounded-lg object-cover cursor-pointer flex-shrink-0 transition-all <?= $fi === 0 ? 'ring-2 ring-cyan-400 opacity-100' : 'opacity-50 hover:opacity-80' ?>"
+                         data-idx="<?= $fi ?>"
                          loading="lazy">
                     <?php endforeach; ?>
                 </div>
             </div>
+            <script>
+            var _aktifFoto = 0;
+            var _fotoUrls = <?= $fotoUrlsJson ?>;
+            function fotoSec(idx) {
+                _aktifFoto = idx;
+                document.getElementById('anaFoto').src = _fotoUrls[idx];
+                document.getElementById('fotoSayac').textContent = idx + 1;
+                document.querySelectorAll('#thumbStrip img').forEach(function(img) {
+                    var i = parseInt(img.getAttribute('data-idx'));
+                    if (i === idx) { img.className = img.className.replace('opacity-50','opacity-100').replace('hover:opacity-80',''); if(!img.className.includes('ring-2')) img.className += ' ring-2 ring-cyan-400'; }
+                    else { img.className = img.className.replace('ring-2 ring-cyan-400','').replace('opacity-100','opacity-50'); if(!img.className.includes('hover:opacity-80')) img.className += ' hover:opacity-80'; }
+                });
+            }
+            function fotoGecis(dir) {
+                var yeni = _aktifFoto + dir;
+                if (yeni < 0) yeni = _fotoUrls.length - 1;
+                if (yeni >= _fotoUrls.length) yeni = 0;
+                fotoSec(yeni);
+            }
+            </script>
             <?php else: ?>
             <div class="h-48 rounded-2xl flex items-center justify-center text-6xl"
                  style="background: rgba(15,23,62,0.6); border: 1px solid rgba(255,255,255,0.06);">🏠</div>
@@ -559,36 +578,42 @@ function ilanDetayData() {
         </div>
     </div>
     <!-- Fotoğraf Tam Ekran Modal -->
-    <template x-if="modalAcik">
-        <div class="fixed inset-0 z-50 flex items-center justify-center" style="background: rgba(0,0,0,0.92);"
-             @click.self="modalAcik = false" @keydown.escape.window="modalAcik = false" @keydown.left.window="aktifFoto = (aktifFoto - 1 + fotoUrls.length) % fotoUrls.length" @keydown.right.window="aktifFoto = (aktifFoto + 1) % fotoUrls.length">
-
-            <!-- Kapat butonu -->
-            <button @click="modalAcik = false"
-                    class="absolute top-4 right-4 w-10 h-10 rounded-full flex items-center justify-center text-white text-xl z-50 hover:bg-white/10 transition-colors"
-                    style="background: rgba(0,0,0,0.5);">✕</button>
-
-            <!-- Sayaç -->
-            <div class="absolute top-4 left-4 px-3 py-1.5 rounded-full text-sm text-white z-50"
-                 style="background: rgba(0,0,0,0.5);"
-                 x-text="(aktifFoto + 1) + ' / ' + fotoUrls.length"></div>
-
-            <!-- Önceki -->
-            <button @click.stop="aktifFoto = (aktifFoto - 1 + fotoUrls.length) % fotoUrls.length"
-                    class="absolute left-3 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full flex items-center justify-center text-white text-2xl z-50 hover:bg-white/10 transition-colors"
-                    style="background: rgba(0,0,0,0.5);">‹</button>
-
-            <!-- Sonraki -->
-            <button @click.stop="aktifFoto = (aktifFoto + 1) % fotoUrls.length"
-                    class="absolute right-3 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full flex items-center justify-center text-white text-2xl z-50 hover:bg-white/10 transition-colors"
-                    style="background: rgba(0,0,0,0.5);">›</button>
-
-            <!-- Tam ekran fotoğraf -->
-            <img :src="fotoUrls[aktifFoto]"
-                 class="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
-                 @click.stop="">
-        </div>
-    </template>
+    <?php if (!empty($fotograflar)): ?>
+    <div id="fotoModal" class="fixed inset-0 z-50 flex items-center justify-center hidden" style="background: rgba(0,0,0,0.92);"
+         onclick="if(event.target===this)modalKapat()">
+        <button onclick="modalKapat()" class="absolute top-4 right-4 w-10 h-10 rounded-full flex items-center justify-center text-white text-xl z-50 hover:bg-white/10 transition-colors" style="background: rgba(0,0,0,0.5);">✕</button>
+        <div id="modalSayac" class="absolute top-4 left-4 px-3 py-1.5 rounded-full text-sm text-white z-50" style="background: rgba(0,0,0,0.5);">1 / <?= count($fotograflar) ?></div>
+        <button onclick="event.stopPropagation();fotoGecis(-1);modalGuncelle()" class="absolute left-3 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full flex items-center justify-center text-white text-2xl z-50 hover:bg-white/10 transition-colors" style="background: rgba(0,0,0,0.5);">‹</button>
+        <button onclick="event.stopPropagation();fotoGecis(1);modalGuncelle()" class="absolute right-3 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full flex items-center justify-center text-white text-2xl z-50 hover:bg-white/10 transition-colors" style="background: rgba(0,0,0,0.5);">›</button>
+        <img id="modalFoto" src="" class="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl" onclick="event.stopPropagation()">
+    </div>
+    <script>
+    function modalAc() {
+        var m = document.getElementById('fotoModal');
+        m.classList.remove('hidden');
+        modalGuncelle();
+        document.addEventListener('keydown', modalKey);
+    }
+    function modalKapat() {
+        document.getElementById('fotoModal').classList.add('hidden');
+        document.removeEventListener('keydown', modalKey);
+    }
+    function modalGuncelle() {
+        document.getElementById('modalFoto').src = _fotoUrls[_aktifFoto];
+        document.getElementById('modalSayac').textContent = (_aktifFoto + 1) + ' / ' + _fotoUrls.length;
+    }
+    function modalKey(e) {
+        if (e.key === 'Escape') modalKapat();
+        else if (e.key === 'ArrowLeft') { fotoGecis(-1); modalGuncelle(); }
+        else if (e.key === 'ArrowRight') { fotoGecis(1); modalGuncelle(); }
+    }
+    // Ana foto tıklamasını bağla
+    document.getElementById('anaFotoWrap')?.addEventListener('click', function(e) {
+        if (e.target.tagName === 'BUTTON') return;
+        modalAc();
+    });
+    </script>
+    <?php endif; ?>
 
 </main>
 
