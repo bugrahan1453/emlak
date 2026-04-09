@@ -112,6 +112,8 @@ switch ($tip) {
                         $pdo->prepare("UPDATE ilanlar SET fotograflar = ? WHERE id = ?")
                             ->execute([json_encode($yeniFotos), $mevcut_id]);
                     }
+                    // son_gorunme güncelle — ilan hâlâ aktif
+                    $pdo->prepare("UPDATE ilanlar SET son_gorunme = NOW() WHERE id = ?")->execute([$mevcut_id]);
                     $atilan++; continue;
                 }
 
@@ -296,24 +298,102 @@ switch ($tip) {
         jsonResponse(true, ['durum' => 'islendi']);
         break;
 
-    // ── KAYNAK ID KONTROL: hangileri DB'de var? ────────────────────────────
+    // ── KAYNAK ID KONTROL: hangileri DB'de var? (v2: fiyat bilgisi de döner) ──
     case 'check_ids':
         $ids    = $payload['ids']    ?? [];
         $site   = $payload['site']   ?? '';
         if (empty($ids) || !$site) {
-            jsonResponse(true, ['mevcut' => []]);
+            jsonResponse(true, ['mevcut' => [], 'fiyatlar' => []]);
         }
 
         // Güvenli parametre binding — max 200 ID
         $ids = array_slice(array_map('strval', $ids), 0, 200);
         $placeholders = implode(',', array_fill(0, count($ids), '?'));
         $stmt = $pdo->prepare(
-            "SELECT kaynak_id FROM ilanlar WHERE kaynak_site = ? AND kaynak_id IN ($placeholders)"
+            "SELECT kaynak_id, fiyat FROM ilanlar WHERE kaynak_site = ? AND kaynak_id IN ($placeholders)"
         );
         $stmt->execute([$site, ...$ids]);
-        $mevcut = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        jsonResponse(true, ['mevcut' => $mevcut]);
+        $mevcut  = [];
+        $fiyatlar = [];
+        foreach ($rows as $row) {
+            $mevcut[]                       = $row['kaynak_id'];
+            $fiyatlar[$row['kaynak_id']]    = (float)$row['fiyat'];
+        }
+
+        jsonResponse(true, ['mevcut' => $mevcut, 'fiyatlar' => $fiyatlar]);
+        break;
+
+    // ── TOPLU GÖRÜLDÜ: son_gorunme güncelle + fiyat değişiklik tespiti ──
+    case 'goruldu':
+        $ilanlar = $payload['ilanlar'] ?? [];
+        $site    = $payload['site']    ?? '';
+        if (empty($ilanlar) || !$site) {
+            jsonResponse(true, ['guncellenen' => 0]);
+        }
+
+        $guncellenen     = 0;
+        $fiyatDegisen    = 0;
+        $now             = date('Y-m-d H:i:s');
+
+        // son_gorunme toplu güncelle
+        $kaynak_ids = array_map(fn($i) => (string)$i['kaynak_id'], $ilanlar);
+        $placeholders = implode(',', array_fill(0, count($kaynak_ids), '?'));
+        $stmt = $pdo->prepare(
+            "UPDATE ilanlar SET son_gorunme = ? WHERE kaynak_site = ? AND kaynak_id IN ($placeholders)"
+        );
+        $stmt->execute([$now, $site, ...$kaynak_ids]);
+        $guncellenen = $stmt->rowCount();
+
+        // Fiyat değişiklik tespiti
+        foreach ($ilanlar as $i) {
+            $yeniFiyat = (float)($i['fiyat'] ?? 0);
+            if ($yeniFiyat <= 0) continue;
+
+            $stmt2 = $pdo->prepare(
+                "SELECT id, fiyat, ofis_id, baslik FROM ilanlar WHERE kaynak_site = ? AND kaynak_id = ? LIMIT 1"
+            );
+            $stmt2->execute([$site, $i['kaynak_id']]);
+            $existing = $stmt2->fetch(PDO::FETCH_ASSOC);
+            if (!$existing) continue;
+
+            $eskiFiyat = (float)$existing['fiyat'];
+            // Fiyat farkı %1'den fazlaysa değişiklik say (kuruş farkları hariç)
+            if ($eskiFiyat > 0 && abs($yeniFiyat - $eskiFiyat) / $eskiFiyat > 0.01) {
+                // Fiyat geçmişine ekle
+                $ilanModel->addFiyatGecmisi($existing['id'], $yeniFiyat);
+
+                // m2_fiyat güncelle
+                $m2Update = '';
+                $m2Params = [$yeniFiyat, $existing['id']];
+                $stmtM2 = $pdo->prepare("SELECT metrekare FROM ilanlar WHERE id = ?");
+                $stmtM2->execute([$existing['id']]);
+                $m2Row = $stmtM2->fetch();
+                $m2Fiyat = ($m2Row && $m2Row['metrekare'] > 0) ? round($yeniFiyat / $m2Row['metrekare'], 2) : null;
+
+                $pdo->prepare(
+                    "UPDATE ilanlar SET fiyat = ?, m2_fiyat = ?, fiyat_degisim_sayisi = fiyat_degisim_sayisi + 1 WHERE id = ?"
+                )->execute([$yeniFiyat, $m2Fiyat, $existing['id']]);
+
+                // Bildirim
+                $degisimPct = (($yeniFiyat - $eskiFiyat) / $eskiFiyat) * 100;
+                $ikon    = $degisimPct < 0 ? 'fiyat_dusus' : 'sistem';
+                $etiket  = $degisimPct < 0 ? '🔻 Fiyat Düştü' : '📈 Fiyat Arttı';
+                $bildirimModel->createForOfis(
+                    $existing['ofis_id'],
+                    $ikon,
+                    $etiket . ': ' . mb_substr($existing['baslik'], 0, 50),
+                    sprintf('%s → %s (%+.1f%%)', formatFiyat($eskiFiyat), formatFiyat($yeniFiyat), $degisimPct),
+                    APP_URL . '/ilan-detay.php?id=' . $existing['id']
+                );
+
+                $fiyatDegisen++;
+            }
+        }
+
+        logSystem('webhook', "goruldu: site={$site}, guncellenen={$guncellenen}, fiyat_degisen={$fiyatDegisen}", null, 1);
+        jsonResponse(true, ['guncellenen' => $guncellenen, 'fiyat_degisen' => $fiyatDegisen]);
         break;
 
 
@@ -445,5 +525,9 @@ function mapIlanData(array $i): array {
         'sahte_sonuc'    => $i['analiz']['sahte_sonuc'] ?? ($i['muhtemelen_sahte'] ? 'muhtemelen_sahte' : 'gercek'),
         'mukerrer_grup_id' => $i['analiz']['mukerrer_grup_id'] ?? $i['mukerrer_grup_id'] ?? null,
         'durum'          => 'aktif',
+        'son_gorunme'    => date('Y-m-d H:i:s'),
+        'm2_fiyat'       => ($metrekare && $metrekare > 0 && (float)($i['fiyat'] ?? 0) > 0)
+                            ? round((float)$i['fiyat'] / $metrekare, 2)
+                            : null,
     ];
 }

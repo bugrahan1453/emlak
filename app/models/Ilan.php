@@ -81,11 +81,11 @@ class Ilan {
             INSERT INTO ilanlar (ofis_id, danisman_id, baslik, aciklama, fiyat, sehir, ilce, mahalle, adres,
                 lat, lng, metrekare, oda_sayisi, kat, bina_yasi, isitma_tipi, esya_durumu, fotograflar,
                 kaynak_site, kaynak_url, kaynak_id, ilan_sahibi_tel, ilan_sahibi_ad, sahibinden_mi,
-                ilan_tipi, emlak_tipi, durum, notlar)
+                ilan_tipi, emlak_tipi, durum, notlar, son_gorunme, m2_fiyat)
             VALUES (:ofis_id, :danisman_id, :baslik, :aciklama, :fiyat, :sehir, :ilce, :mahalle, :adres,
                 :lat, :lng, :metrekare, :oda_sayisi, :kat, :bina_yasi, :isitma_tipi, :esya_durumu, :fotograflar,
                 :kaynak_site, :kaynak_url, :kaynak_id, :ilan_sahibi_tel, :ilan_sahibi_ad, :sahibinden_mi,
-                :ilan_tipi, :emlak_tipi, :durum, :notlar)
+                :ilan_tipi, :emlak_tipi, :durum, :notlar, :son_gorunme, :m2_fiyat)
         ");
         $stmt->execute([
             ':ofis_id'        => $data['ofis_id'] ?? null,
@@ -116,6 +116,8 @@ class Ilan {
             ':emlak_tipi'     => $data['emlak_tipi'] ?? 'daire',
             ':durum'          => $data['durum'] ?? 'aktif',
             ':notlar'         => $data['notlar'] ?? null,
+            ':son_gorunme'    => $data['son_gorunme'] ?? date('Y-m-d H:i:s'),
+            ':m2_fiyat'       => $data['m2_fiyat'] ?? null,
         ]);
         return (int)$this->db->lastInsertId();
     }
@@ -124,7 +126,8 @@ class Ilan {
         $allowed = ['baslik','aciklama','fiyat','sehir','ilce','mahalle','adres','lat','lng',
                     'metrekare','oda_sayisi','kat','bina_yasi','isitma_tipi','esya_durumu',
                     'ilan_tipi','emlak_tipi','durum','notlar','danisman_id','sahte_skoru',
-                    'pazarlik_skoru','emsal_deger','ai_degerleme'];
+                    'pazarlik_skoru','emsal_deger','ai_degerleme',
+                    'son_gorunme','m2_fiyat','fiyat_degisim_sayisi','silinme_tarihi'];
         $fields = [];
         $params = [];
         foreach ($allowed as $f) {
