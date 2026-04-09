@@ -28,6 +28,9 @@ class IlanController {
             'fiyat_min'  => getVal('fiyat_min'),
             'fiyat_max'  => getVal('fiyat_max'),
             'q'          => getVal('q'),
+            'fiyat_dusen'   => getVal('fiyat_dusen'),
+            'uzun_suredir'  => getVal('uzun_suredir'),
+            'son_gorulmeyen'=> getVal('son_gorulmeyen'),
         ];
         $filters = array_filter($filters, fn($v) => $v !== '' && $v !== null);
 

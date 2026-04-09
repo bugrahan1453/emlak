@@ -49,6 +49,29 @@ require_once APP_DIR . '/views/layout/header.php';
         </div>
     </div>
 
+    <!-- Hızlı Filtreler -->
+    <div class="flex flex-wrap gap-2">
+        <?php
+        $hizliFiltreler = [
+            ['param' => 'fiyat_dusen', 'label' => '🔻 Fiyat Düşenler', 'renk' => '#ff3366', 'bg' => 'rgba(255,51,102,0.12)'],
+            ['param' => 'uzun_suredir', 'label' => '⏱️ 30+ Gün Yayında', 'renk' => '#ffaa00', 'bg' => 'rgba(255,170,0,0.12)'],
+            ['param' => 'son_gorulmeyen', 'label' => '👻 1 Haftadır Görülmeyen', 'renk' => '#7a8599', 'bg' => 'rgba(122,133,153,0.12)'],
+        ];
+        foreach ($hizliFiltreler as $hf):
+            $aktif = getVal($hf['param']) == '1';
+            $href  = $aktif
+                ? '?' . http_build_query(array_diff_key($_GET, [$hf['param'] => '']))
+                : '?' . http_build_query(array_merge($_GET, [$hf['param'] => '1', 'sayfa' => '1']));
+        ?>
+        <a href="<?= $href ?>"
+           class="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+           style="background: <?= $aktif ? $hf['bg'] : 'rgba(255,255,255,0.04)' ?>; color: <?= $aktif ? $hf['renk'] : '#7a8599' ?>; border: 1px solid <?= $aktif ? $hf['renk'] . '33' : 'rgba(255,255,255,0.06)' ?>;">
+            <?= $hf['label'] ?>
+            <?php if ($aktif): ?> ✕<?php endif; ?>
+        </a>
+        <?php endforeach; ?>
+    </div>
+
     <!-- Filtre Barı -->
     <?php
     $filtreler = [
@@ -109,8 +132,25 @@ require_once APP_DIR . '/views/layout/header.php';
                     '</div>' .
                     '<div><a href="' . APP_URL . '/ilan-detay.php?id=' . (int)$ilan['id'] . '" class="text-sm hover:text-cyan-400 transition-colors" style="color:#e8ecf4;">' . e(truncate($ilan['baslik'], 50)) . '</a>' .
                     '<p class="text-xs" style="color:#7a8599;">' . e($ilan['danisman_ad'] ?? 'Atanmamış') . '</p></div></div>',
-                // Fiyat
-                '<span class="font-mono font-semibold" style="color:#00d4ff;">' . formatFiyat((float)$ilan['fiyat']) . '</span>',
+                // Fiyat + değişim göstergesi
+                (function() use ($ilan) {
+                    $html = '<span class="font-mono font-semibold" style="color:#00d4ff;">' . formatFiyat((float)$ilan['fiyat']) . '</span>';
+                    if (($ilan['fiyat_degisim_sayisi'] ?? 0) > 0) {
+                        $gecmis = is_string($ilan['fiyat_gecmisi'] ?? '') ? json_decode($ilan['fiyat_gecmisi'], true) : ($ilan['fiyat_gecmisi'] ?? []);
+                        if (!empty($gecmis)) {
+                            $ilkFiyat = (float)$gecmis[0]['fiyat'];
+                            $suankiFiyat = (float)$ilan['fiyat'];
+                            if ($ilkFiyat > 0 && $suankiFiyat < $ilkFiyat) {
+                                $dususPct = round((($ilkFiyat - $suankiFiyat) / $ilkFiyat) * 100);
+                                $html .= '<br><span class="text-xs" style="color:#ff3366;">🔻 %' . $dususPct . ' düştü</span>';
+                            } elseif ($ilkFiyat > 0 && $suankiFiyat > $ilkFiyat) {
+                                $artisPct = round((($suankiFiyat - $ilkFiyat) / $ilkFiyat) * 100);
+                                $html .= '<br><span class="text-xs" style="color:#ffaa00;">📈 %' . $artisPct . ' arttı</span>';
+                            }
+                        }
+                    }
+                    return $html;
+                })(),
                 // Konum
                 '<span style="color:#7a8599;">📍 ' . e(($ilan['ilce'] ?? '') . ($ilan['mahalle'] ? '/' . $ilan['mahalle'] : '')) . '</span>',
                 // m²

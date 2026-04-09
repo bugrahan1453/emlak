@@ -51,8 +51,27 @@ class Ilan {
             $params[] = $filters['q'] . '*';
         }
 
+        // Özel filtreler
+        if (!empty($filters['fiyat_dusen'])) {
+            $where[] = 'i.fiyat_degisim_sayisi > 0';
+            $where[] = 'i.fiyat_gecmisi IS NOT NULL';
+            $where[] = "i.fiyat_gecmisi != '[]'";
+        }
+        if (!empty($filters['uzun_suredir'])) {
+            $where[] = 'i.created_at <= DATE_SUB(NOW(), INTERVAL 30 DAY)';
+        }
+        if (!empty($filters['son_gorulmeyen'])) {
+            $where[] = '(i.son_gorunme IS NULL OR i.son_gorunme <= DATE_SUB(NOW(), INTERVAL 7 DAY))';
+        }
+
         $whereStr = implode(' AND ', $where);
         $offset   = ($sayfa - 1) * $limit;
+
+        // Özel sıralama
+        $orderBy = 'i.created_at DESC';
+        if (!empty($filters['fiyat_dusen'])) {
+            $orderBy = 'i.fiyat_degisim_sayisi DESC';
+        }
 
         $countStmt = $this->db->prepare("SELECT COUNT(*) FROM ilanlar i WHERE $whereStr");
         $countStmt->execute($params);
@@ -63,7 +82,7 @@ class Ilan {
             FROM ilanlar i
             LEFT JOIN kullanicilar k ON k.id = i.danisman_id
             WHERE $whereStr
-            ORDER BY i.created_at DESC
+            ORDER BY $orderBy
             LIMIT $limit OFFSET $offset
         ");
         $stmt->execute($params);
