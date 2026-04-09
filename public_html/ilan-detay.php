@@ -44,14 +44,18 @@ $fotoUrl = function(string $f): string {
 };
 $fotoUrlsJson = json_encode(array_values(array_map($fotoUrl, $fotograflar)), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 ?>
-<script>window.__fotoUrls = <?= $fotoUrlsJson ?>;</script>
+<script>
+function ilanDetayData() {
+    return {
+        aktifFoto: 0, modalAcik: false, silOnay: false,
+        aiYukleniyor: {}, aiSonuc: {},
+        sesliNotAcik: false,
+        fotoUrls: <?= $fotoUrlsJson ?>
+    };
+}
+</script>
 <main class="flex-1 p-4 lg:p-6 pb-20 lg:pb-6"
-      x-data="{
-          aktifFoto: 0, modalAcik: false, silOnay: false,
-          aiYukleniyor: {}, aiSonuc: {},
-          sesliNotAcik: false,
-          fotoUrls: window.__fotoUrls || []
-      }">
+      x-data="ilanDetayData()">
 
     <!-- Breadcrumb + Kaynak Link -->
     <div class="flex items-center justify-between flex-wrap gap-2 mb-4">
