@@ -34,6 +34,15 @@ require_once APP_DIR . '/views/layout/header.php';
 <?php require_once APP_DIR . '/views/layout/topbar.php'; ?>
 <?php require_once APP_DIR . '/views/components/bildirim-popup.php'; ?>
 
+<?php
+$fotograflar = is_string($ilan['fotograflar']) ? json_decode($ilan['fotograflar'], true) : ($ilan['fotograflar'] ?? []);
+$fotograflar = is_array($fotograflar) ? $fotograflar : [];
+$fotoUrl = function(string $f): string {
+    return (strpos($f, 'http') === 0)
+        ? APP_URL . '/api/img-proxy.php?url=' . urlencode($f)
+        : APP_URL . '/uploads/fotograflar/' . basename($f);
+};
+?>
 <main class="flex-1 p-4 lg:p-6 pb-20 lg:pb-6"
       x-data="{
           aktifFoto: 0, modalAcik: false, silOnay: false,
@@ -55,14 +64,6 @@ require_once APP_DIR . '/views/layout/header.php';
         <div class="lg:col-span-2 space-y-4">
 
             <!-- Fotoğraf Galerisi -->
-            <?php
-            $fotograflar = is_string($ilan['fotograflar']) ? json_decode($ilan['fotograflar'], true) : ($ilan['fotograflar'] ?? []);
-            $fotoUrl = function(string $f): string {
-                return (strpos($f, 'http') === 0)
-                    ? APP_URL . '/api/img-proxy.php?url=' . urlencode($f)
-                    : APP_URL . '/uploads/fotograflar/' . e(basename($f));
-            };
-            ?>
             <?php if (!empty($fotograflar)): ?>
             <div class="rounded-2xl overflow-hidden" style="background: rgba(15,23,62,0.6); border: 1px solid rgba(255,255,255,0.06);">
                 <!-- Ana foto: doğal boyut, sıfır kırpma -->
@@ -533,6 +534,38 @@ require_once APP_DIR . '/views/layout/header.php';
             <?php endif; ?>
         </div>
     </div>
+    <!-- Fotoğraf Tam Ekran Modal -->
+    <template x-if="modalAcik">
+        <div class="fixed inset-0 z-50 flex items-center justify-center" style="background: rgba(0,0,0,0.92);"
+             @click.self="modalAcik = false" @keydown.escape.window="modalAcik = false" @keydown.left.window="aktifFoto = (aktifFoto - 1 + fotoUrls.length) % fotoUrls.length" @keydown.right.window="aktifFoto = (aktifFoto + 1) % fotoUrls.length">
+
+            <!-- Kapat butonu -->
+            <button @click="modalAcik = false"
+                    class="absolute top-4 right-4 w-10 h-10 rounded-full flex items-center justify-center text-white text-xl z-50 hover:bg-white/10 transition-colors"
+                    style="background: rgba(0,0,0,0.5);">✕</button>
+
+            <!-- Sayaç -->
+            <div class="absolute top-4 left-4 px-3 py-1.5 rounded-full text-sm text-white z-50"
+                 style="background: rgba(0,0,0,0.5);"
+                 x-text="(aktifFoto + 1) + ' / ' + fotoUrls.length"></div>
+
+            <!-- Önceki -->
+            <button @click.stop="aktifFoto = (aktifFoto - 1 + fotoUrls.length) % fotoUrls.length"
+                    class="absolute left-3 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full flex items-center justify-center text-white text-2xl z-50 hover:bg-white/10 transition-colors"
+                    style="background: rgba(0,0,0,0.5);">‹</button>
+
+            <!-- Sonraki -->
+            <button @click.stop="aktifFoto = (aktifFoto + 1) % fotoUrls.length"
+                    class="absolute right-3 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full flex items-center justify-center text-white text-2xl z-50 hover:bg-white/10 transition-colors"
+                    style="background: rgba(0,0,0,0.5);">›</button>
+
+            <!-- Tam ekran fotoğraf -->
+            <img :src="fotoUrls[aktifFoto]"
+                 class="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
+                 @click.stop="">
+        </div>
+    </template>
+
 </main>
 
 <!-- AI Çağrı JS -->
