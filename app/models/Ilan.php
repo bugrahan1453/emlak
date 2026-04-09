@@ -258,4 +258,162 @@ class Ilan {
         $stmt->execute([$ofisId, $sehir]);
         return array_column($stmt->fetchAll(), 'ilce');
     }
+
+    // ─── Piyasa Radarı Sorguları ──────────────────────────────────────────
+
+    /**
+     * Piyasa radarı özet istatistikleri
+     */
+    public function getRadarStats(int $ofisId): array {
+        $stmt = $this->db->prepare("
+            SELECT
+                COUNT(*) as toplam_aktif,
+                SUM(CASE WHEN fiyat_degisim_sayisi > 0 AND fiyat > 0 THEN 1 ELSE 0 END) as fiyat_dusen,
+                SUM(CASE WHEN DATEDIFF(NOW(), created_at) >= 30 THEN 1 ELSE 0 END) as uzun_suredir,
+                SUM(CASE WHEN son_gorunme IS NULL OR son_gorunme <= DATE_SUB(NOW(), INTERVAL 7 DAY) THEN 1 ELSE 0 END) as kaldirilmis,
+                SUM(CASE WHEN DATE(created_at) = CURDATE() THEN 1 ELSE 0 END) as bugun_eklenen
+            FROM ilanlar
+            WHERE ofis_id = ? AND durum = 'aktif'
+        ");
+        $stmt->execute([$ofisId]);
+        return $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    /**
+     * Mahalle bazında ortalama m² fiyat
+     */
+    public function getMahalleOrtM2(int $ofisId, string $sehir = '', string $ilce = ''): array {
+        $where = ['ofis_id = ?', 'durum = "aktif"', 'm2_fiyat > 0', 'fiyat > 0'];
+        $params = [$ofisId];
+        if ($sehir) { $where[] = 'sehir = ?'; $params[] = $sehir; }
+        if ($ilce) { $where[] = 'ilce = ?'; $params[] = $ilce; }
+        $w = implode(' AND ', $where);
+
+        $stmt = $this->db->prepare("
+            SELECT ilce, mahalle,
+                   ROUND(AVG(m2_fiyat), 0) as ort_m2,
+                   COUNT(*) as ilan_sayisi,
+                   ROUND(MIN(m2_fiyat), 0) as min_m2,
+                   ROUND(MAX(m2_fiyat), 0) as max_m2
+            FROM ilanlar
+            WHERE $w
+            GROUP BY ilce, mahalle
+            HAVING ilan_sayisi >= 2
+            ORDER BY ort_m2 ASC
+        ");
+        $stmt->execute($params);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Fırsat skoru hesapla — en iyi fırsatları döndür
+     * Skor = (m² ucuzluk) + (ilan ömrü) + (fiyat düşüş) + (satıcı yorgunluğu)
+     */
+    public function getFirsatListesi(int $ofisId, int $limit = 30): array {
+        $stmt = $this->db->prepare("
+            SELECT i.id, i.baslik, i.fiyat, i.m2_fiyat, i.metrekare, i.oda_sayisi,
+                   i.sehir, i.ilce, i.mahalle, i.ilan_sahibi_ad, i.ilan_sahibi_tel,
+                   i.kaynak_site, i.kaynak_url, i.created_at, i.son_gorunme,
+                   i.fiyat_degisim_sayisi, i.fiyat_gecmisi, i.fotograflar,
+                   DATEDIFF(NOW(), i.created_at) as ilan_gun,
+                   avg_tbl.ort_m2,
+                   CASE
+                       WHEN avg_tbl.ort_m2 > 0 AND i.m2_fiyat > 0
+                       THEN ROUND(((avg_tbl.ort_m2 - i.m2_fiyat) / avg_tbl.ort_m2) * 100, 1)
+                       ELSE 0
+                   END as m2_ucuzluk_pct
+            FROM ilanlar i
+            LEFT JOIN (
+                SELECT ilce, mahalle, AVG(m2_fiyat) as ort_m2
+                FROM ilanlar
+                WHERE ofis_id = ? AND durum = 'aktif' AND m2_fiyat > 0 AND fiyat > 0
+                GROUP BY ilce, mahalle
+            ) avg_tbl ON avg_tbl.ilce = i.ilce AND avg_tbl.mahalle = i.mahalle
+            WHERE i.ofis_id = ? AND i.durum = 'aktif' AND i.fiyat > 0
+            ORDER BY
+                (COALESCE(i.fiyat_degisim_sayisi, 0) * 15) +
+                (LEAST(DATEDIFF(NOW(), i.created_at), 90) / 3) +
+                (CASE WHEN avg_tbl.ort_m2 > 0 AND i.m2_fiyat > 0 AND i.m2_fiyat < avg_tbl.ort_m2
+                      THEN LEAST(((avg_tbl.ort_m2 - i.m2_fiyat) / avg_tbl.ort_m2) * 100, 50)
+                      ELSE 0 END)
+                DESC
+            LIMIT ?
+        ");
+        $stmt->execute([$ofisId, $ofisId, $limit]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // Fırsat skoru ve yorgun satıcı skoru hesapla
+        foreach ($rows as &$row) {
+            $gun = (int)$row['ilan_gun'];
+            $degisim = (int)$row['fiyat_degisim_sayisi'];
+            $m2Ucuz = (float)$row['m2_ucuzluk_pct'];
+
+            // Yorgun satıcı skoru (0-100)
+            $yorgunSkor = min(100,
+                min($gun, 90) * 0.5 +          // max 45 puan: uzun süre yayında
+                $degisim * 15 +                  // her fiyat düşüşü 15 puan
+                ($gun > 60 ? 10 : 0)             // 60+ gün bonus
+            );
+
+            // Fırsat skoru (0-100)
+            $firsatSkor = min(100,
+                max(0, $m2Ucuz) * 0.8 +          // m² ucuzluk katkısı
+                $yorgunSkor * 0.3 +               // yorgun satıcı katkısı
+                $degisim * 10                     // fiyat düşüş katkısı
+            );
+
+            // İlk fiyat ve toplam düşüş hesapla
+            $gecmis = is_string($row['fiyat_gecmisi']) ? json_decode($row['fiyat_gecmisi'], true) : [];
+            $ilkFiyat = !empty($gecmis) ? (float)$gecmis[0]['fiyat'] : (float)$row['fiyat'];
+            $toplamDususPct = ($ilkFiyat > 0 && (float)$row['fiyat'] < $ilkFiyat)
+                ? round((($ilkFiyat - (float)$row['fiyat']) / $ilkFiyat) * 100, 1)
+                : 0;
+
+            $row['yorgun_skor'] = round($yorgunSkor);
+            $row['firsat_skor'] = round($firsatSkor);
+            $row['ilk_fiyat'] = $ilkFiyat;
+            $row['toplam_dusus_pct'] = $toplamDususPct;
+
+            if ($row['fotograflar']) {
+                $f = json_decode($row['fotograflar'], true);
+                $row['ana_foto'] = is_array($f) && !empty($f[0]) ? $f[0] : null;
+            }
+            unset($row['fotograflar'], $row['fiyat_gecmisi']);
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Son fiyat düşen ilanlar
+     */
+    public function getSonFiyatDusenler(int $ofisId, int $limit = 10): array {
+        $stmt = $this->db->prepare("
+            SELECT id, baslik, fiyat, m2_fiyat, ilce, mahalle, oda_sayisi,
+                   fiyat_degisim_sayisi, fiyat_gecmisi, kaynak_site,
+                   ilan_sahibi_ad, ilan_sahibi_tel, fotograflar
+            FROM ilanlar
+            WHERE ofis_id = ? AND durum = 'aktif' AND fiyat > 0
+              AND fiyat_degisim_sayisi > 0 AND fiyat_gecmisi IS NOT NULL AND fiyat_gecmisi != '[]'
+            ORDER BY updated_at DESC
+            LIMIT ?
+        ");
+        $stmt->execute([$ofisId, $limit]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        foreach ($rows as &$row) {
+            $gecmis = json_decode($row['fiyat_gecmisi'], true) ?: [];
+            $ilkFiyat = !empty($gecmis) ? (float)$gecmis[0]['fiyat'] : (float)$row['fiyat'];
+            $row['ilk_fiyat'] = $ilkFiyat;
+            $row['dusus_pct'] = ($ilkFiyat > 0 && (float)$row['fiyat'] < $ilkFiyat)
+                ? round((($ilkFiyat - (float)$row['fiyat']) / $ilkFiyat) * 100, 1)
+                : 0;
+            if ($row['fotograflar']) {
+                $f = json_decode($row['fotograflar'], true);
+                $row['ana_foto'] = is_array($f) && !empty($f[0]) ? $f[0] : null;
+            }
+            unset($row['fotograflar'], $row['fiyat_gecmisi']);
+        }
+        return $rows;
+    }
 }

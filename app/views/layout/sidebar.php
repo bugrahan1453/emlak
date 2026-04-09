@@ -20,8 +20,8 @@ try {
 
 $menuItems = [
     ['href' => 'dashboard.php',      'icon' => '📊', 'label' => 'Dashboard',        'id' => 'dashboard'],
-    ['href' => 'ilanlar.php',        'icon' => '📡', 'label' => 'Piyasa Radarı',    'id' => 'ilanlar',  'badge' => $bugunIlan > 0 ? $bugunIlan : null, 'badge_color' => 'cyan'],
-    ['href' => 'ilan-ekle.php',      'icon' => '🏠', 'label' => 'İlan Yönetimi',    'id' => 'ilan-ekle'],
+    ['href' => 'piyasa-radari.php',  'icon' => '📡', 'label' => 'Piyasa Radarı',    'id' => 'piyasa-radari',  'badge' => $bugunIlan > 0 ? $bugunIlan : null, 'badge_color' => 'cyan'],
+    ['href' => 'ilanlar.php',        'icon' => '🏠', 'label' => 'İlan Yönetimi',    'id' => 'ilanlar'],
     ['href' => 'eslestirmeler.php',  'icon' => '🔗', 'label' => 'Eşleştirmeler',    'id' => 'eslestirmeler', 'badge' => $eslestirmeBekleyen > 0 ? $eslestirmeBekleyen : null, 'badge_color' => 'purple'],
     ['href' => 'gorevler.php',       'icon' => '✅', 'label' => 'Görev Merkezi',    'id' => 'gorevler',  'badge' => $gorevSayisi > 0 ? $gorevSayisi : null, 'badge_color' => 'amber'],
     ['href' => 'musteriler.php',     'icon' => '📇', 'label' => 'Müşteri CRM',      'id' => 'musteriler'],
