@@ -499,7 +499,7 @@ function mapIlanData(array $i): array {
         'ofis_id'        => 1,
         'baslik'         => mb_substr($i['baslik'] ?? '', 0, 255),
         'aciklama'       => $i['aciklama'] ?? null,
-        'fiyat'          => (float)($i['fiyat'] ?? 0),
+        'fiyat'          => min((float)($i['fiyat'] ?? 0), 500000000),
         'sehir'          => $sehir,
         'ilce'           => $ilce,
         'mahalle'        => $mahalle,
