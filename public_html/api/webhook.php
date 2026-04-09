@@ -484,6 +484,10 @@ function mapIlanData(array $i): array {
     $adres   = $i['konum']['adres']   ?? $i['adres']    ?? null;
 
     $metrekare  = (int)($i['ozellikler']['metrekare']  ?? $i['metrekare']  ?? 0) ?: null;
+    // m² validasyonu: daire/villa/müstakil için 10.000 m²'den büyük olamaz, arsa için 1.000.000 m²
+    $emlakTipi = $i['kategori'] ?? $i['emlak_tipi'] ?? 'daire';
+    $maxM2 = in_array($emlakTipi, ['arsa', 'tarla']) ? 1000000 : 10000;
+    if ($metrekare && $metrekare > $maxM2) $metrekare = null;
     $oda_sayisi = $i['ozellikler']['oda_sayisi'] ?? $i['oda_sayisi'] ?? null;
     $kat        = $i['ozellikler']['kat']        ?? $i['kat']        ?? null;
     $bina_yasi  = (int)($i['ozellikler']['bina_yasi']  ?? $i['bina_yasi']  ?? 0) ?: null;
