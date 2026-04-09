@@ -1,9 +1,7 @@
 ---
 deployment:
   tasks:
-    - export DEPLOYPATH=/home/hetagayrimenkul
-    - /bin/cp -rf $TRAVIS_BUILD_DIR/app $DEPLOYPATH/
-    - /bin/cp -rf $TRAVIS_BUILD_DIR/public_html $DEPLOYPATH/
-    - /bin/cp -rf $TRAVIS_BUILD_DIR/cron $DEPLOYPATH/
-    - /bin/cp -rf $TRAVIS_BUILD_DIR/assets $DEPLOYPATH/
-    - /bin/cp -f $TRAVIS_BUILD_DIR/.htaccess $DEPLOYPATH/ 2>/dev/null; true
+    - /bin/cp -rf /home/hetagayrimenkul/repositories/emlak/app /home/hetagayrimenkul/
+    - /bin/cp -rf /home/hetagayrimenkul/repositories/emlak/public_html /home/hetagayrimenkul/
+    - /bin/cp -rf /home/hetagayrimenkul/repositories/emlak/cron /home/hetagayrimenkul/
+    - /bin/cp -rf /home/hetagayrimenkul/repositories/emlak/assets /home/hetagayrimenkul/
