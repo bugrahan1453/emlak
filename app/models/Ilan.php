@@ -54,6 +54,7 @@ class Ilan {
         // Özel filtreler
         if (!empty($filters['fiyat_dusen'])) {
             $where[] = 'i.fiyat_degisim_sayisi > 0';
+            $where[] = 'i.fiyat > 0';
             $where[] = 'i.fiyat_gecmisi IS NOT NULL';
             $where[] = "i.fiyat_gecmisi != '[]'";
         }

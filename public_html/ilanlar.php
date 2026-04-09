@@ -135,7 +135,7 @@ require_once APP_DIR . '/views/layout/header.php';
                 // Fiyat + değişim göstergesi
                 (function() use ($ilan) {
                     $html = '<span class="font-mono font-semibold" style="color:#00d4ff;">' . formatFiyat((float)$ilan['fiyat']) . '</span>';
-                    if (($ilan['fiyat_degisim_sayisi'] ?? 0) > 0) {
+                    if (($ilan['fiyat_degisim_sayisi'] ?? 0) > 0 && (float)$ilan['fiyat'] > 0) {
                         $gecmis = is_string($ilan['fiyat_gecmisi'] ?? '') ? json_decode($ilan['fiyat_gecmisi'], true) : ($ilan['fiyat_gecmisi'] ?? []);
                         if (!empty($gecmis)) {
                             $ilkFiyat = (float)$gecmis[0]['fiyat'];
