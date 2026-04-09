@@ -290,14 +290,14 @@ class Ilan {
         $w = implode(' AND ', $where);
 
         $stmt = $this->db->prepare("
-            SELECT ilce, mahalle,
+            SELECT ilce, mahalle, ilan_tipi,
                    ROUND(AVG(m2_fiyat), 0) as ort_m2,
                    COUNT(*) as ilan_sayisi,
                    ROUND(MIN(m2_fiyat), 0) as min_m2,
                    ROUND(MAX(m2_fiyat), 0) as max_m2
             FROM ilanlar
             WHERE $w
-            GROUP BY ilce, mahalle
+            GROUP BY ilce, mahalle, ilan_tipi
             HAVING ilan_sayisi >= 2
             ORDER BY ort_m2 ASC
         ");
@@ -324,11 +324,11 @@ class Ilan {
                    END as m2_ucuzluk_pct
             FROM ilanlar i
             LEFT JOIN (
-                SELECT ilce, mahalle, AVG(m2_fiyat) as ort_m2
+                SELECT ilce, mahalle, ilan_tipi, AVG(m2_fiyat) as ort_m2
                 FROM ilanlar
                 WHERE ofis_id = ? AND durum = 'aktif' AND m2_fiyat > 0 AND fiyat > 0
-                GROUP BY ilce, mahalle
-            ) avg_tbl ON avg_tbl.ilce = i.ilce AND avg_tbl.mahalle = i.mahalle
+                GROUP BY ilce, mahalle, ilan_tipi
+            ) avg_tbl ON avg_tbl.ilce = i.ilce AND avg_tbl.mahalle = i.mahalle AND avg_tbl.ilan_tipi = i.ilan_tipi
             WHERE i.ofis_id = ? AND i.durum = 'aktif' AND i.fiyat > 0
             ORDER BY
                 (COALESCE(i.fiyat_degisim_sayisi, 0) * 15) +
@@ -348,18 +348,21 @@ class Ilan {
             $degisim = (int)$row['fiyat_degisim_sayisi'];
             $m2Ucuz = (float)$row['m2_ucuzluk_pct'];
 
+            // m² ucuzluk max %50 ile sınırla (gerçekçi olmayan değerleri kes)
+            $m2Ucuz = min(50, max(0, $m2Ucuz));
+
             // Yorgun satıcı skoru (0-100)
             $yorgunSkor = min(100,
-                min($gun, 90) * 0.5 +          // max 45 puan: uzun süre yayında
-                $degisim * 15 +                  // her fiyat düşüşü 15 puan
-                ($gun > 60 ? 10 : 0)             // 60+ gün bonus
+                min($gun, 120) * 0.4 +           // max 48 puan: uzun süre yayında
+                $degisim * 20 +                   // her fiyat düşüşü 20 puan
+                ($gun > 60 ? 10 : 0)              // 60+ gün bonus
             );
 
             // Fırsat skoru (0-100)
             $firsatSkor = min(100,
-                max(0, $m2Ucuz) * 0.8 +          // m² ucuzluk katkısı
-                $yorgunSkor * 0.3 +               // yorgun satıcı katkısı
-                $degisim * 10                     // fiyat düşüş katkısı
+                $m2Ucuz * 1.2 +                   // max 60 puan: m² ucuzluk (en önemli)
+                $yorgunSkor * 0.25 +              // max 25 puan: yorgun satıcı
+                $degisim * 8                      // her fiyat düşüşü 8 puan
             );
 
             // İlk fiyat ve toplam düşüş hesapla
