@@ -51,11 +51,29 @@ $fotoUrl = function(string $f): string {
           fotoUrls: <?= json_encode(array_values(array_map($fotoUrl, $fotograflar)), JSON_UNESCAPED_UNICODE) ?>
       }">
 
-    <!-- Breadcrumb -->
-    <div class="flex items-center gap-2 text-xs mb-4" style="color: #7a8599;">
-        <a href="<?= APP_URL ?>/ilanlar.php" class="hover:text-cyan-400">İlanlar</a>
-        <span>›</span>
-        <span style="color: #e8ecf4;"><?= e(truncate($ilan['baslik'], 50)) ?></span>
+    <!-- Breadcrumb + Kaynak Link -->
+    <div class="flex items-center justify-between flex-wrap gap-2 mb-4">
+        <div class="flex items-center gap-2 text-xs" style="color: #7a8599;">
+            <a href="<?= APP_URL ?>/ilanlar.php" class="hover:text-cyan-400">İlanlar</a>
+            <span>›</span>
+            <span style="color: #e8ecf4;"><?= e(truncate($ilan['baslik'], 50)) ?></span>
+        </div>
+        <?php if (!empty($ilan['kaynak_url'])): ?>
+        <?php
+        $kaynakSiteMap = [
+            'sahibinden' => ['label' => 'Sahibinden', 'renk' => '#ff8800', 'bg' => 'rgba(255,136,0,0.12)'],
+            'hepsiemlak' => ['label' => 'Hepsiemlak', 'renk' => '#e5202e', 'bg' => 'rgba(229,32,46,0.12)'],
+            'emlakjet'   => ['label' => 'Emlakjet',   'renk' => '#00b4d8', 'bg' => 'rgba(0,180,216,0.12)'],
+            'manuel'     => ['label' => 'Manuel',     'renk' => '#7a8599', 'bg' => 'rgba(122,133,153,0.12)'],
+        ];
+        $ks = $kaynakSiteMap[$ilan['kaynak_site'] ?? ''] ?? ['label' => ucfirst($ilan['kaynak_site'] ?? 'Kaynak'), 'renk' => '#7a8599', 'bg' => 'rgba(122,133,153,0.12)'];
+        ?>
+        <a href="<?= e($ilan['kaynak_url']) ?>" target="_blank" rel="noopener noreferrer"
+           class="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium transition-all hover:scale-105"
+           style="background: <?= $ks['bg'] ?>; color: <?= $ks['renk'] ?>; border: 1px solid <?= $ks['renk'] ?>33;">
+            🔗 <?= $ks['label'] ?>'de Aç
+        </a>
+        <?php endif; ?>
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
