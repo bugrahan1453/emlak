@@ -55,7 +55,7 @@ require_once APP_DIR . '/views/layout/header.php';
         $hizliFiltreler = [
             ['param' => 'fiyat_dusen', 'label' => '🔻 Fiyat Düşenler', 'renk' => '#ff3366', 'bg' => 'rgba(255,51,102,0.12)'],
             ['param' => 'uzun_suredir', 'label' => '⏱️ 30+ Gün Yayında', 'renk' => '#ffaa00', 'bg' => 'rgba(255,170,0,0.12)'],
-            ['param' => 'son_gorulmeyen', 'label' => '👻 1 Haftadır Görülmeyen', 'renk' => '#7a8599', 'bg' => 'rgba(122,133,153,0.12)'],
+            ['param' => 'son_gorulmeyen', 'label' => '🪦 Kaldırılmış / Satılmış', 'renk' => '#7a8599', 'bg' => 'rgba(122,133,153,0.12)'],
         ];
         foreach ($hizliFiltreler as $hf):
             $aktif = getVal($hf['param']) == '1';
