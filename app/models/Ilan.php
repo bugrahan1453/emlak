@@ -290,14 +290,14 @@ class Ilan {
         $w = implode(' AND ', $where);
 
         $stmt = $this->db->prepare("
-            SELECT ilce, mahalle, ilan_tipi,
+            SELECT ilce, mahalle, ilan_tipi, emlak_tipi,
                    ROUND(AVG(m2_fiyat), 0) as ort_m2,
                    COUNT(*) as ilan_sayisi,
                    ROUND(MIN(m2_fiyat), 0) as min_m2,
                    ROUND(MAX(m2_fiyat), 0) as max_m2
             FROM ilanlar
             WHERE $w
-            GROUP BY ilce, mahalle, ilan_tipi
+            GROUP BY ilce, mahalle, ilan_tipi, emlak_tipi
             HAVING ilan_sayisi >= 2
             ORDER BY ort_m2 ASC
         ");
@@ -324,11 +324,12 @@ class Ilan {
                    END as m2_ucuzluk_pct
             FROM ilanlar i
             LEFT JOIN (
-                SELECT ilce, mahalle, ilan_tipi, AVG(m2_fiyat) as ort_m2
+                SELECT ilce, mahalle, ilan_tipi, emlak_tipi, AVG(m2_fiyat) as ort_m2
                 FROM ilanlar
                 WHERE ofis_id = ? AND durum = 'aktif' AND m2_fiyat > 0 AND fiyat > 0
-                GROUP BY ilce, mahalle, ilan_tipi
-            ) avg_tbl ON avg_tbl.ilce = i.ilce AND avg_tbl.mahalle = i.mahalle AND avg_tbl.ilan_tipi = i.ilan_tipi
+                GROUP BY ilce, mahalle, ilan_tipi, emlak_tipi
+            ) avg_tbl ON avg_tbl.ilce = i.ilce AND avg_tbl.mahalle = i.mahalle
+                      AND avg_tbl.ilan_tipi = i.ilan_tipi AND avg_tbl.emlak_tipi = i.emlak_tipi
             WHERE i.ofis_id = ? AND i.durum = 'aktif' AND i.fiyat > 0
             ORDER BY
                 (COALESCE(i.fiyat_degisim_sayisi, 0) * 15) +
