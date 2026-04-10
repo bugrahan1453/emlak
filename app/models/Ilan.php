@@ -391,33 +391,31 @@ class Ilan {
             $grupKey = $row['ilce'] . '|' . $row['mahalle'] . '|' . $row['ilan_tipi'] . '|' . $row['emlak_tipi'];
             $medyanM2 = $medyanMap[$grupKey] ?? 0;
 
-            // Ortalamaya göre ucuzluk
-            $ortUcuzluk = ($ilanAdet >= 5 && $ortM2 > 0 && $m2Fiyat > 0)
+            // Mahalle boşsa karşılaştırma güvenilmez, ilçe bazında bak
+            $grupKeyMahalle = $row['mahalle'] ? $grupKey : null;
+
+            // Ortalamaya göre ucuzluk (mahalle varsa mahalle, yoksa gösterme)
+            $ortUcuzluk = ($grupKeyMahalle && $ilanAdet >= 5 && $ortM2 > 0 && $m2Fiyat > 0)
                 ? min(30, round(($ortM2 - $m2Fiyat) / $ortM2 * 100, 1)) : 0;
             // Medyana göre ucuzluk
-            $medyanUcuzluk = ($ilanAdet >= 5 && $medyanM2 > 0 && $m2Fiyat > 0)
+            $medyanUcuzluk = ($grupKeyMahalle && $ilanAdet >= 5 && $medyanM2 > 0 && $m2Fiyat > 0)
                 ? min(30, round(($medyanM2 - $m2Fiyat) / $medyanM2 * 100, 1)) : 0;
 
             $row['m2_ucuzluk_pct'] = max(0, $ortUcuzluk);
             $row['m2_ucuzluk_medyan'] = max(0, $medyanUcuzluk);
             $row['medyan_m2'] = round($medyanM2);
             $row['ort_m2'] = round($ortM2);
+            $row['ilan_adet_grup'] = $ilanAdet;
 
             // Fırsat skoru için medyanı kullan (daha güvenilir)
             $m2Ucuz = min(30, max(0, (float)$medyanUcuzluk));
 
             // Yorgun satıcı skoru (0-100)
             $yorgunSkor = min(100,
-                min($gun, 120) * 0.4 +           // max 48 puan: uzun süre yayında
-                $degisim * 20 +                   // her fiyat düşüşü 20 puan
-                ($gun > 60 ? 10 : 0)              // 60+ gün bonus
-            );
-
-            // Fırsat skoru (0-100)
-            $firsatSkor = min(100,
-                $m2Ucuz * 1.2 +                   // max 60 puan: m² ucuzluk (en önemli)
-                $yorgunSkor * 0.25 +              // max 25 puan: yorgun satıcı
-                $degisim * 8                      // her fiyat düşüşü 8 puan
+                min($gun, 180) * 0.3 +           // max 54 puan: uzun süre yayında
+                $degisim * 15 +                   // her fiyat değişimi 15 puan
+                ($gun > 60 ? 10 : 0) +            // 60+ gün bonus
+                ($gun > 120 ? 10 : 0)             // 120+ gün ekstra bonus
             );
 
             // İlk fiyat ve toplam düşüş hesapla
@@ -426,6 +424,14 @@ class Ilan {
             $toplamDususPct = ($ilkFiyat > 0 && (float)$row['fiyat'] < $ilkFiyat)
                 ? round((($ilkFiyat - (float)$row['fiyat']) / $ilkFiyat) * 100, 1)
                 : 0;
+
+            // Fırsat skoru (0-100) — daha dengeli formül
+            $firsatSkor = min(100,
+                $m2Ucuz * 1.5 +                   // max 45 puan: m² ucuzluk (medyana göre)
+                min($gun, 180) * 0.15 +           // max 27 puan: ilan ömrü
+                $degisim * 12 +                   // her fiyat değişimi 12 puan
+                ($toplamDususPct > 0 ? min($toplamDususPct, 20) : 0)  // max 20 puan: toplam fiyat düşüşü
+            );
 
             $row['yorgun_skor'] = round($yorgunSkor);
             $row['firsat_skor'] = round($firsatSkor);
