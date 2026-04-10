@@ -332,7 +332,7 @@ class Ilan {
                    avg_tbl.ort_m2,
                    CASE
                        WHEN avg_tbl.ort_m2 > 0 AND i.m2_fiyat > 0
-                       THEN ROUND(((avg_tbl.ort_m2 - i.m2_fiyat) / avg_tbl.ort_m2) * 100, 1)
+                       THEN LEAST(50, ROUND(((avg_tbl.ort_m2 - i.m2_fiyat) / avg_tbl.ort_m2) * 100, 1))
                        ELSE 0
                    END as m2_ucuzluk_pct
             FROM ilanlar i
