@@ -140,11 +140,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     </button>
                 </form>
 
-                <div class="mt-6 pt-4 border-t text-center" style="border-color: rgba(255,255,255,0.06);">
-                    <p class="text-xs" style="color: #7a8599;">
-                        Demo: <span style="color: #00d4ff;">admin@hetagayrimenkul.com</span> / <span style="color: #00d4ff;">Admin123!</span>
-                    </p>
-                </div>
             </div>
 
             <!-- Radar aktif göstergesi -->
