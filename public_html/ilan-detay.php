@@ -191,9 +191,9 @@ function ilanDetayData() {
                         type: 'line',
                         data: {
                             labels: gecmis.map(g => g.tarih.substring(0,10)),
-                            datasets: [{ data: gecmis.map(g => g.fiyat), borderColor: '#00d4ff', fill: true, backgroundColor: 'rgba(0,212,255,0.05)', tension: 0.4, pointRadius: 4, pointBackgroundColor: '#00d4ff' }]
+                            datasets: [{ data: gecmis.map(g => parseFloat(g.fiyat)), borderColor: '#00d4ff', fill: true, backgroundColor: 'rgba(0,212,255,0.05)', tension: 0.4, pointRadius: 4, pointBackgroundColor: '#00d4ff' }]
                         },
-                        options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#7a8599', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } }, y: { ticks: { color: '#7a8599', callback: function(v) { return v >= 1000000 ? (v/1000000).toFixed(1)+'M ₺' : v >= 1000 ? (v/1000).toFixed(0)+'K ₺' : v+' ₺'; } }, grid: { color: 'rgba(255,255,255,0.04)' } } } }
+                        options: { plugins: { legend: { display: false }, tooltip: { callbacks: { label: function(ctx) { var v = ctx.parsed.y; return v >= 1000000 ? (v/1000000).toFixed(1)+' M ₺' : v >= 1000 ? new Intl.NumberFormat('tr-TR').format(v)+' ₺' : v+' ₺'; } } } }, scales: { x: { ticks: { color: '#7a8599', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } }, y: { ticks: { color: '#7a8599', callback: function(v) { if (v >= 1000000) return (v/1000000).toFixed(1)+' M ₺'; if (v >= 1000) return (v/1000).toFixed(0)+' K ₺'; return v+' ₺'; } }, grid: { color: 'rgba(255,255,255,0.04)' } } } }
                     });
                 });
                 </script>
