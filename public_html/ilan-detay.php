@@ -168,26 +168,68 @@ function ilanDetayData() {
             <?php endif; ?>
 
             <!-- Fiyat Geçmişi -->
-            <?php $fiyatGecmisi = is_string($ilan['fiyat_gecmisi']) ? json_decode($ilan['fiyat_gecmisi'], true) : ($ilan['fiyat_gecmisi'] ?? []); ?>
+            <?php
+            $fiyatGecmisi = is_string($ilan['fiyat_gecmisi']) ? json_decode($ilan['fiyat_gecmisi'], true) : ($ilan['fiyat_gecmisi'] ?? []);
+            $fiyatGecmisi = is_array($fiyatGecmisi) ? $fiyatGecmisi : [];
+            // Mevcut fiyatı sona ekle (grafik + liste için)
+            $tumFiyatlar = $fiyatGecmisi;
+            if ($ilan['fiyat'] > 0) {
+                $tumFiyatlar[] = ['fiyat' => (float)$ilan['fiyat'], 'tarih' => date('Y-m-d H:i:s')];
+            }
+            ?>
             <?php if (!empty($fiyatGecmisi)): ?>
             <div class="rounded-2xl p-5" style="background: rgba(15,23,62,0.6); border: 1px solid rgba(255,255,255,0.06);">
-                <h3 class="text-sm font-semibold mb-3" style="color: #e8ecf4;">📉 Fiyat Geçmişi</h3>
+                <h3 class="text-sm font-semibold mb-3" style="color: #e8ecf4;">📉 Fiyat Geçmişi (<?= count($fiyatGecmisi) ?> değişiklik)</h3>
+
+                <!-- Grafik -->
                 <canvas id="fiyat-grafigi" height="80"></canvas>
                 <script>
                 document.addEventListener('DOMContentLoaded', function() {
                     var ctx = document.getElementById('fiyat-grafigi');
-                    var gecmis = <?= json_encode($fiyatGecmisi, JSON_UNESCAPED_UNICODE) ?>;
-                    gecmis.push({ fiyat: <?= (float)$ilan['fiyat'] ?>, tarih: '<?= date('Y-m-d H:i:s') ?>' });
+                    var gecmis = <?= json_encode($tumFiyatlar, JSON_UNESCAPED_UNICODE) ?>;
                     new Chart(ctx, {
                         type: 'line',
                         data: {
                             labels: gecmis.map(g => g.tarih.substring(0,10)),
-                            datasets: [{ data: gecmis.map(g => g.fiyat), borderColor: '#00d4ff', fill: true, backgroundColor: 'rgba(0,212,255,0.05)', tension: 0.4, pointRadius: 3 }]
+                            datasets: [{ data: gecmis.map(g => g.fiyat), borderColor: '#00d4ff', fill: true, backgroundColor: 'rgba(0,212,255,0.05)', tension: 0.4, pointRadius: 4, pointBackgroundColor: '#00d4ff' }]
                         },
-                        options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#7a8599' }, grid: { color: 'rgba(255,255,255,0.04)' } }, y: { ticks: { color: '#7a8599', callback: v => (v/1000000).toFixed(1)+'M ₺' }, grid: { color: 'rgba(255,255,255,0.04)' } } } }
+                        options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#7a8599', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } }, y: { ticks: { color: '#7a8599', callback: function(v) { return v >= 1000000 ? (v/1000000).toFixed(1)+'M ₺' : v >= 1000 ? (v/1000).toFixed(0)+'K ₺' : v+' ₺'; } }, grid: { color: 'rgba(255,255,255,0.04)' } } } }
                     });
                 });
                 </script>
+
+                <!-- Fiyat değişim listesi -->
+                <div class="mt-4 space-y-2">
+                    <?php for ($fi = count($tumFiyatlar) - 1; $fi >= 0; $fi--):
+                        $f = $tumFiyatlar[$fi];
+                        $oncekiFiyat = $fi > 0 ? (float)$tumFiyatlar[$fi - 1]['fiyat'] : null;
+                        $fark = $oncekiFiyat ? (float)$f['fiyat'] - $oncekiFiyat : null;
+                        $farkPct = ($oncekiFiyat && $oncekiFiyat > 0) ? ($fark / $oncekiFiyat) * 100 : null;
+                        $tarih = date('d.m.Y', strtotime($f['tarih']));
+                        $sonMu = ($fi === count($tumFiyatlar) - 1);
+                    ?>
+                    <div class="flex items-center justify-between p-2 rounded-lg text-xs" style="background: rgba(255,255,255,0.03);">
+                        <div class="flex items-center gap-2">
+                            <?php if ($sonMu): ?>
+                                <span class="px-1.5 py-0.5 rounded text-[10px] font-bold" style="background: rgba(0,212,255,0.15); color: #00d4ff;">GÜNCEL</span>
+                            <?php elseif ($fi === 0): ?>
+                                <span class="px-1.5 py-0.5 rounded text-[10px]" style="background: rgba(122,133,153,0.15); color: #7a8599;">İLK FİYAT</span>
+                            <?php endif; ?>
+                            <span style="color: #7a8599;"><?= $tarih ?></span>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <span class="font-mono font-semibold" style="color: #e8ecf4;"><?= number_format((float)$f['fiyat'], 0, ',', '.') ?> ₺</span>
+                            <?php if ($fark !== null): ?>
+                                <?php if ($fark < 0): ?>
+                                    <span class="font-mono" style="color: #00ff88;">🔻 <?= number_format(abs($fark), 0, ',', '.') ?> ₺ (<?= number_format(abs($farkPct), 1) ?>%)</span>
+                                <?php elseif ($fark > 0): ?>
+                                    <span class="font-mono" style="color: #ff3366;">📈 +<?= number_format($fark, 0, ',', '.') ?> ₺ (+<?= number_format($farkPct, 1) ?>%)</span>
+                                <?php endif; ?>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                    <?php endfor; ?>
+                </div>
             </div>
             <?php endif; ?>
 
