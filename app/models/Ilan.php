@@ -61,6 +61,8 @@ class Ilan {
             $where[] = 'i.fiyat > 0';
             $where[] = 'i.fiyat_gecmisi IS NOT NULL';
             $where[] = "i.fiyat_gecmisi != '[]'";
+            // İlk fiyattan düşük olanları filtrele (yükselenleri hariç tut)
+            $where[] = 'i.fiyat < CAST(JSON_UNQUOTE(JSON_EXTRACT(i.fiyat_gecmisi, "$[0].fiyat")) AS DECIMAL(15,2))';
         }
         if (!empty($filters['uzun_suredir'])) {
             $where[] = 'i.created_at <= DATE_SUB(NOW(), INTERVAL 30 DAY)';
@@ -272,7 +274,7 @@ class Ilan {
         $stmt = $this->db->prepare("
             SELECT
                 COUNT(*) as toplam_aktif,
-                SUM(CASE WHEN fiyat_degisim_sayisi > 0 AND fiyat > 0 THEN 1 ELSE 0 END) as fiyat_dusen,
+                SUM(CASE WHEN fiyat_degisim_sayisi > 0 AND fiyat > 0 AND fiyat_gecmisi IS NOT NULL AND fiyat_gecmisi != '[]' AND fiyat < CAST(JSON_UNQUOTE(JSON_EXTRACT(fiyat_gecmisi, '$[0].fiyat')) AS DECIMAL(15,2)) THEN 1 ELSE 0 END) as fiyat_dusen,
                 SUM(CASE WHEN DATEDIFF(NOW(), created_at) >= 30 THEN 1 ELSE 0 END) as uzun_suredir,
                 SUM(CASE WHEN son_gorunme IS NULL OR son_gorunme <= DATE_SUB(NOW(), INTERVAL 7 DAY) THEN 1 ELSE 0 END) as kaldirilmis,
                 SUM(CASE WHEN DATE(created_at) = CURDATE() THEN 1 ELSE 0 END) as bugun_eklenen
