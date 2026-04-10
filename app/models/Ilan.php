@@ -329,15 +329,15 @@ class Ilan {
                    i.kaynak_site, i.kaynak_url, i.created_at, i.son_gorunme,
                    i.fiyat_degisim_sayisi, i.fiyat_gecmisi, i.fotograflar,
                    DATEDIFF(NOW(), i.created_at) as ilan_gun,
-                   avg_tbl.ort_m2,
+                   avg_tbl.ort_m2, avg_tbl.ilan_adet,
                    CASE
-                       WHEN avg_tbl.ort_m2 > 0 AND i.m2_fiyat > 0
-                       THEN LEAST(50, ROUND(((avg_tbl.ort_m2 - i.m2_fiyat) / avg_tbl.ort_m2) * 100, 1))
+                       WHEN avg_tbl.ilan_adet >= 5 AND avg_tbl.ort_m2 > 0 AND i.m2_fiyat > 0
+                       THEN LEAST(30, ROUND(((avg_tbl.ort_m2 - i.m2_fiyat) / avg_tbl.ort_m2) * 100, 1))
                        ELSE 0
                    END as m2_ucuzluk_pct
             FROM ilanlar i
             LEFT JOIN (
-                SELECT ilce, mahalle, ilan_tipi, emlak_tipi, AVG(m2_fiyat) as ort_m2
+                SELECT ilce, mahalle, ilan_tipi, emlak_tipi, AVG(m2_fiyat) as ort_m2, COUNT(*) as ilan_adet
                 FROM ilanlar
                 WHERE ofis_id = ? AND durum = 'aktif' AND m2_fiyat > 0 AND fiyat > 0
                 GROUP BY ilce, mahalle, ilan_tipi, emlak_tipi
@@ -347,8 +347,8 @@ class Ilan {
             ORDER BY
                 (COALESCE(i.fiyat_degisim_sayisi, 0) * 15) +
                 (LEAST(DATEDIFF(NOW(), i.created_at), 90) / 3) +
-                (CASE WHEN avg_tbl.ort_m2 > 0 AND i.m2_fiyat > 0 AND i.m2_fiyat < avg_tbl.ort_m2
-                      THEN LEAST(((avg_tbl.ort_m2 - i.m2_fiyat) / avg_tbl.ort_m2) * 100, 50)
+                (CASE WHEN avg_tbl.ilan_adet >= 5 AND avg_tbl.ort_m2 > 0 AND i.m2_fiyat > 0 AND i.m2_fiyat < avg_tbl.ort_m2
+                      THEN LEAST(((avg_tbl.ort_m2 - i.m2_fiyat) / avg_tbl.ort_m2) * 100, 30)
                       ELSE 0 END)
                 DESC
             LIMIT ?
@@ -362,8 +362,8 @@ class Ilan {
             $degisim = (int)$row['fiyat_degisim_sayisi'];
             $m2Ucuz = (float)$row['m2_ucuzluk_pct'];
 
-            // m² ucuzluk max %50 ile sınırla (gerçekçi olmayan değerleri kes)
-            $m2Ucuz = min(50, max(0, $m2Ucuz));
+            // m² ucuzluk max %30 ile sınırla (gerçekçi olmayan değerleri kes)
+            $m2Ucuz = min(30, max(0, $m2Ucuz));
 
             // Yorgun satıcı skoru (0-100)
             $yorgunSkor = min(100,
