@@ -59,10 +59,9 @@ class Ilan {
         if (!empty($filters['fiyat_dusen'])) {
             $where[] = 'i.fiyat_degisim_sayisi > 0';
             $where[] = 'i.fiyat > 0';
-            $where[] = 'i.fiyat_gecmisi IS NOT NULL';
-            $where[] = "i.fiyat_gecmisi != '[]'";
-            // İlk fiyattan düşük olanları filtrele (yükselenleri hariç tut)
-            $where[] = 'i.fiyat < CAST(JSON_UNQUOTE(JSON_EXTRACT(i.fiyat_gecmisi, "$[0].fiyat")) AS DECIMAL(15,2))';
+            $where[] = 'i.ilk_fiyat IS NOT NULL';
+            $where[] = 'i.ilk_fiyat > 0';
+            $where[] = 'i.fiyat < i.ilk_fiyat';
         }
         if (!empty($filters['uzun_suredir'])) {
             $where[] = 'i.created_at <= DATE_SUB(NOW(), INTERVAL 30 DAY)';
@@ -236,7 +235,7 @@ class Ilan {
     }
 
     public function addFiyatGecmisi(int $id, float $yeniFiyat): void {
-        $stmt = $this->db->prepare("SELECT fiyat, fiyat_gecmisi FROM ilanlar WHERE id = ?");
+        $stmt = $this->db->prepare("SELECT fiyat, ilk_fiyat, fiyat_gecmisi FROM ilanlar WHERE id = ?");
         $stmt->execute([$id]);
         $row = $stmt->fetch();
         if (!$row) return;
@@ -245,8 +244,11 @@ class Ilan {
         $gecmis[] = ['fiyat' => $row['fiyat'], 'tarih' => date('Y-m-d H:i:s')];
         if (count($gecmis) > 20) $gecmis = array_slice($gecmis, -20);
 
-        $upd = $this->db->prepare("UPDATE ilanlar SET fiyat = ?, fiyat_gecmisi = ? WHERE id = ?");
-        $upd->execute([$yeniFiyat, json_encode($gecmis, JSON_UNESCAPED_UNICODE), $id]);
+        // İlk fiyat henüz set edilmediyse, eski fiyatı ilk fiyat olarak kaydet
+        $ilkFiyat = $row['ilk_fiyat'] ?: $row['fiyat'];
+
+        $upd = $this->db->prepare("UPDATE ilanlar SET fiyat = ?, ilk_fiyat = COALESCE(ilk_fiyat, ?), fiyat_gecmisi = ? WHERE id = ?");
+        $upd->execute([$yeniFiyat, $ilkFiyat, json_encode($gecmis, JSON_UNESCAPED_UNICODE), $id]);
     }
 
     public function incrementGoruntulenme(int $id): void {
@@ -274,7 +276,7 @@ class Ilan {
         $stmt = $this->db->prepare("
             SELECT
                 (SELECT COUNT(*) FROM ilanlar WHERE ofis_id = ? AND durum = 'aktif') as toplam_aktif,
-                (SELECT COUNT(*) FROM ilanlar WHERE ofis_id = ? AND durum = 'aktif' AND fiyat_degisim_sayisi > 0 AND fiyat > 0 AND fiyat_gecmisi IS NOT NULL AND fiyat_gecmisi != '[]' AND fiyat < CAST(JSON_UNQUOTE(JSON_EXTRACT(fiyat_gecmisi, '$[0].fiyat')) AS DECIMAL(15,2))) as fiyat_dusen,
+                (SELECT COUNT(*) FROM ilanlar WHERE ofis_id = ? AND durum = 'aktif' AND fiyat_degisim_sayisi > 0 AND fiyat > 0 AND ilk_fiyat > 0 AND fiyat < ilk_fiyat) as fiyat_dusen,
                 (SELECT COUNT(*) FROM ilanlar WHERE ofis_id = ? AND durum = 'aktif' AND DATEDIFF(NOW(), created_at) >= 30) as uzun_suredir,
                 (SELECT COUNT(*) FROM ilanlar WHERE ofis_id = ? AND durum = 'kaldırılmış') as kaldirilmis,
                 (SELECT COUNT(*) FROM ilanlar WHERE ofis_id = ? AND durum = 'aktif' AND DATE(created_at) = CURDATE()) as bugun_eklenen
