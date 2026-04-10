@@ -54,6 +54,7 @@ require_once APP_DIR . '/views/layout/header.php';
         <?php
         $hizliFiltreler = [
             ['param' => 'fiyat_dusen', 'label' => '🔻 Fiyat Düşenler', 'renk' => '#ff3366', 'bg' => 'rgba(255,51,102,0.12)'],
+            ['param' => 'fiyat_artan', 'label' => '📈 Fiyat Artanlar', 'renk' => '#ffaa00', 'bg' => 'rgba(255,170,0,0.12)'],
             ['param' => 'uzun_suredir', 'label' => '⏱️ 30+ Gün Yayında', 'renk' => '#ffaa00', 'bg' => 'rgba(255,170,0,0.12)'],
             ['param' => 'son_gorulmeyen', 'label' => '🪦 Kaldırılmış / Satılmış', 'renk' => '#7a8599', 'bg' => 'rgba(122,133,153,0.12)'],
         ];

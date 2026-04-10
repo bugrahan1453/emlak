@@ -63,6 +63,13 @@ class Ilan {
             $where[] = 'i.ilk_fiyat > 0';
             $where[] = 'i.fiyat < i.ilk_fiyat';
         }
+        if (!empty($filters['fiyat_artan'])) {
+            $where[] = 'i.fiyat_degisim_sayisi > 0';
+            $where[] = 'i.fiyat > 0';
+            $where[] = 'i.ilk_fiyat IS NOT NULL';
+            $where[] = 'i.ilk_fiyat > 0';
+            $where[] = 'i.fiyat > i.ilk_fiyat';
+        }
         if (!empty($filters['uzun_suredir'])) {
             $where[] = 'i.created_at <= DATE_SUB(NOW(), INTERVAL 30 DAY)';
         }
@@ -75,7 +82,7 @@ class Ilan {
 
         // Özel sıralama
         $orderBy = 'i.created_at DESC';
-        if (!empty($filters['fiyat_dusen'])) {
+        if (!empty($filters['fiyat_dusen']) || !empty($filters['fiyat_artan'])) {
             $orderBy = 'i.fiyat_degisim_sayisi DESC';
         }
 
