@@ -396,6 +396,39 @@ switch ($tip) {
         jsonResponse(true, ['guncellenen' => $guncellenen, 'fiyat_degisen' => $fiyatDegisen]);
         break;
 
+    // ── KALDIRILMIŞ KONTROL: sitede artık olmayan ilanları işaretle ───────
+    case 'kaldirilmis_kontrol':
+        $site     = $payload['site'] ?? '';
+        $aktifIds = $payload['aktif_ids'] ?? [];
+        if (!$site || count($aktifIds) < 10) {
+            jsonResponse(true, ['kaldirilmis' => 0, 'neden' => 'yetersiz_veri']);
+        }
+
+        // Bu sitedeki aktif ilanların ID'lerini al
+        $stmt = $pdo->prepare(
+            "SELECT id, kaynak_id, baslik, ofis_id FROM ilanlar WHERE kaynak_site = ? AND durum = 'aktif'"
+        );
+        $stmt->execute([$site]);
+        $sunucudakiler = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $aktifSet = array_flip($aktifIds); // hızlı lookup için
+        $kaldirilmis = 0;
+        $now = date('Y-m-d H:i:s');
+
+        foreach ($sunucudakiler as $ilan) {
+            if (!isset($aktifSet[$ilan['kaynak_id']])) {
+                // Sitede yok → kaldırılmış olarak işaretle
+                $pdo->prepare(
+                    "UPDATE ilanlar SET durum = 'kaldırılmış', silinme_tarihi = ? WHERE id = ?"
+                )->execute([$now, $ilan['id']]);
+                $kaldirilmis++;
+            }
+        }
+
+        logSystem('webhook', "kaldirilmis_kontrol: site={$site}, aktif_ids=" . count($aktifIds) . ", kaldirilmis={$kaldirilmis}", null, 1);
+        jsonResponse(true, ['kaldirilmis' => $kaldirilmis, 'kontrol_edilen' => count($sunucudakiler)]);
+        break;
+
 
 }
 

@@ -27,7 +27,11 @@ class Ilan {
     }
 
     public function getList(array $filters = [], int $sayfa = 1, int $limit = PER_PAGE): array {
-        $where  = ['i.durum != "silindi"'];
+        // Kaldırılmış filtresi aktifse kaldırılmışları göster, değilse gizle
+        $durumFiltre = !empty($filters['son_gorulmeyen'])
+            ? 'i.durum != "silindi"'
+            : 'i.durum NOT IN ("silindi", "kaldırılmış")';
+        $where  = [$durumFiltre];
         $params = [];
 
         if (!empty($filters['ofis_id']))    { $where[] = 'i.ofis_id = ?';      $params[] = $filters['ofis_id']; }
@@ -62,7 +66,7 @@ class Ilan {
             $where[] = 'i.created_at <= DATE_SUB(NOW(), INTERVAL 30 DAY)';
         }
         if (!empty($filters['son_gorulmeyen'])) {
-            $where[] = '(i.son_gorunme IS NOT NULL AND i.son_gorunme <= DATE_SUB(NOW(), INTERVAL 30 DAY))';
+            $where[] = "i.durum = 'kaldırılmış'";
         }
 
         $whereStr = implode(' AND ', $where);
