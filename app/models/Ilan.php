@@ -62,7 +62,7 @@ class Ilan {
             $where[] = 'i.created_at <= DATE_SUB(NOW(), INTERVAL 30 DAY)';
         }
         if (!empty($filters['son_gorulmeyen'])) {
-            $where[] = '(i.son_gorunme IS NULL OR i.son_gorunme <= DATE_SUB(NOW(), INTERVAL 7 DAY))';
+            $where[] = '(i.son_gorunme IS NOT NULL AND i.son_gorunme <= DATE_SUB(NOW(), INTERVAL 30 DAY))';
         }
 
         $whereStr = implode(' AND ', $where);
