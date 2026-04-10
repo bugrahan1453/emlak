@@ -323,18 +323,41 @@ class Ilan {
      * Skor = (m² ucuzluk) + (ilan ömrü) + (fiyat düşüş) + (satıcı yorgunluğu)
      */
     public function getFirsatListesi(int $ofisId, int $limit = 30): array {
+        // Medyan hesabı için tüm m2_fiyat değerlerini grup bazında çek
+        $medyanStmt = $this->db->prepare("
+            SELECT ilce, mahalle, ilan_tipi, emlak_tipi, m2_fiyat
+            FROM ilanlar
+            WHERE ofis_id = ? AND durum = 'aktif' AND m2_fiyat > 0 AND fiyat > 0
+            ORDER BY ilce, mahalle, ilan_tipi, emlak_tipi, m2_fiyat
+        ");
+        $medyanStmt->execute([$ofisId]);
+        $allRows = $medyanStmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // Grup bazında medyan hesapla
+        $gruplar = [];
+        foreach ($allRows as $r) {
+            $key = $r['ilce'] . '|' . $r['mahalle'] . '|' . $r['ilan_tipi'] . '|' . $r['emlak_tipi'];
+            $gruplar[$key][] = (float)$r['m2_fiyat'];
+        }
+        $medyanMap = [];
+        foreach ($gruplar as $key => $fiyatlar) {
+            $n = count($fiyatlar);
+            // fiyatlar zaten sıralı (ORDER BY m2_fiyat)
+            if ($n % 2 === 0) {
+                $medyanMap[$key] = ($fiyatlar[$n/2 - 1] + $fiyatlar[$n/2]) / 2;
+            } else {
+                $medyanMap[$key] = $fiyatlar[intdiv($n, 2)];
+            }
+        }
+
         $stmt = $this->db->prepare("
             SELECT i.id, i.baslik, i.fiyat, i.m2_fiyat, i.metrekare, i.oda_sayisi,
                    i.sehir, i.ilce, i.mahalle, i.ilan_sahibi_ad, i.ilan_sahibi_tel,
                    i.kaynak_site, i.kaynak_url, i.created_at, i.son_gorunme,
                    i.fiyat_degisim_sayisi, i.fiyat_gecmisi, i.fotograflar,
+                   i.ilan_tipi, i.emlak_tipi,
                    DATEDIFF(NOW(), i.created_at) as ilan_gun,
-                   avg_tbl.ort_m2, avg_tbl.ilan_adet,
-                   CASE
-                       WHEN avg_tbl.ilan_adet >= 5 AND avg_tbl.ort_m2 > 0 AND i.m2_fiyat > 0
-                       THEN LEAST(30, ROUND(((avg_tbl.ort_m2 - i.m2_fiyat) / avg_tbl.ort_m2) * 100, 1))
-                       ELSE 0
-                   END as m2_ucuzluk_pct
+                   avg_tbl.ort_m2, avg_tbl.ilan_adet
             FROM ilanlar i
             LEFT JOIN (
                 SELECT ilce, mahalle, ilan_tipi, emlak_tipi, AVG(m2_fiyat) as ort_m2, COUNT(*) as ilan_adet
@@ -360,10 +383,28 @@ class Ilan {
         foreach ($rows as &$row) {
             $gun = (int)$row['ilan_gun'];
             $degisim = (int)$row['fiyat_degisim_sayisi'];
-            $m2Ucuz = (float)$row['m2_ucuzluk_pct'];
+            $ilanAdet = (int)($row['ilan_adet'] ?? 0);
+            $ortM2 = (float)($row['ort_m2'] ?? 0);
+            $m2Fiyat = (float)$row['m2_fiyat'];
 
-            // m² ucuzluk max %30 ile sınırla (gerçekçi olmayan değerleri kes)
-            $m2Ucuz = min(30, max(0, $m2Ucuz));
+            // Medyan değerini bul
+            $grupKey = $row['ilce'] . '|' . $row['mahalle'] . '|' . $row['ilan_tipi'] . '|' . $row['emlak_tipi'];
+            $medyanM2 = $medyanMap[$grupKey] ?? 0;
+
+            // Ortalamaya göre ucuzluk
+            $ortUcuzluk = ($ilanAdet >= 5 && $ortM2 > 0 && $m2Fiyat > 0)
+                ? min(30, round(($ortM2 - $m2Fiyat) / $ortM2 * 100, 1)) : 0;
+            // Medyana göre ucuzluk
+            $medyanUcuzluk = ($ilanAdet >= 5 && $medyanM2 > 0 && $m2Fiyat > 0)
+                ? min(30, round(($medyanM2 - $m2Fiyat) / $medyanM2 * 100, 1)) : 0;
+
+            $row['m2_ucuzluk_pct'] = max(0, $ortUcuzluk);
+            $row['m2_ucuzluk_medyan'] = max(0, $medyanUcuzluk);
+            $row['medyan_m2'] = round($medyanM2);
+            $row['ort_m2'] = round($ortM2);
+
+            // Fırsat skoru için medyanı kullan (daha güvenilir)
+            $m2Ucuz = min(30, max(0, (float)$medyanUcuzluk));
 
             // Yorgun satıcı skoru (0-100)
             $yorgunSkor = min(100,

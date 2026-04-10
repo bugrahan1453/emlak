@@ -102,8 +102,11 @@ require_once APP_DIR . '/views/layout/header.php';
                             <div class="text-sm font-mono font-semibold" style="color: #00d4ff;"><?= formatFiyat($f['fiyat']) ?></div>
                             <?php if ($f['toplam_dusus_pct'] > 0): ?>
                             <div class="text-xs" style="color: #ff3366;">🔻 %<?= $f['toplam_dusus_pct'] ?></div>
-                            <?php elseif ($f['m2_ucuzluk_pct'] > 5 && $f['m2_ucuzluk_pct'] <= 30): ?>
-                            <div class="text-xs" style="color: #00ff88;">m² %<?= round($f['m2_ucuzluk_pct'], 1) ?> ucuz</div>
+                            <?php endif; ?>
+                            <?php if (($f['m2_ucuzluk_medyan'] ?? 0) > 5): ?>
+                            <div class="text-xs" style="color: #00ff88;">m² %<?= round($f['m2_ucuzluk_medyan'], 1) ?> ucuz</div>
+                            <?php elseif (($f['m2_ucuzluk_pct'] ?? 0) > 5): ?>
+                            <div class="text-xs" style="color: #7a8599;">ort. %<?= round($f['m2_ucuzluk_pct'], 1) ?> ucuz</div>
                             <?php endif; ?>
                         </div>
 
