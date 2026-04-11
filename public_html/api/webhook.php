@@ -429,6 +429,32 @@ switch ($tip) {
         jsonResponse(true, ['kaldirilmis' => $kaldirilmis, 'kontrol_edilen' => count($sunucudakiler)]);
         break;
 
+    // ── SIFIR FİYAT TEMİZLEME ─────────────────────────────────────────
+    case 'temizle_sifir_fiyat':
+        $site = $payload['site'] ?? null;
+        $islem = $payload['islem'] ?? 'sil'; // 'sil' veya 'listele'
+
+        $where = "fiyat IS NULL OR fiyat = 0 OR fiyat = ''";
+        $params = [];
+        if ($site) {
+            $where .= " AND kaynak_site = ?";
+            $params[] = $site;
+        }
+
+        if ($islem === 'listele') {
+            $stmt = $pdo->prepare("SELECT id, kaynak_id, kaynak_site, baslik, fiyat FROM ilanlar WHERE {$where} LIMIT 500");
+            $stmt->execute($params);
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            jsonResponse(true, ['adet' => count($rows), 'ilanlar' => $rows]);
+        } else {
+            $stmt = $pdo->prepare("DELETE FROM ilanlar WHERE {$where}");
+            $stmt->execute($params);
+            $silinen = $stmt->rowCount();
+            logSystem('webhook', "temizle_sifir_fiyat: site=" . ($site ?? 'tumu') . ", silinen={$silinen}", null, 1);
+            jsonResponse(true, ['silinen' => $silinen, 'site' => $site ?? 'tumu']);
+        }
+        break;
+
 
 }
 
