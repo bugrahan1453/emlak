@@ -106,8 +106,6 @@ switch ($tip) {
 
         foreach ($ilanlar as $i) {
             try {
-                $pdo->beginTransaction();
-
                 // Mükerrer kontrol
                 $mevcut_id = null;
                 if (!empty($i['kaynak_url'])) {
@@ -138,12 +136,11 @@ switch ($tip) {
                     }
                     // son_gorunme güncelle — ilan hâlâ aktif
                     $pdo->prepare("UPDATE ilanlar SET son_gorunme = NOW() WHERE id = ?")->execute([$mevcut_id]);
-                    $pdo->commit();
                     $atilan++; continue;
                 }
 
                 $ilanData = mapIlanData($i);
-                if (!$ilanData['baslik']) { $pdo->commit(); $atilan++; continue; }
+                if (!$ilanData['baslik']) { $atilan++; continue; }
                 // Fiyat 0 ise logla ama kaydetmeye devam et (fiyat çekilememiş olabilir)
 
                 try {
@@ -151,7 +148,6 @@ switch ($tip) {
                 } catch (PDOException $dupEx) {
                     // Duplicate key (SQLSTATE 23000) — iki paralel run aynı ilanı eklemeye çalıştı
                     if (str_starts_with($dupEx->getCode(), '23')) {
-                        $pdo->rollBack();
                         $atilan++; continue;
                     }
                     throw $dupEx;
@@ -183,10 +179,7 @@ switch ($tip) {
                     );
                 }
 
-                $pdo->commit();
-
             } catch (Exception $e) {
-                if ($pdo->inTransaction()) $pdo->rollBack();
                 $errors[] = $e->getMessage();
                 error_log('Webhook yeni_ilan hatası: ' . $e->getMessage());
             }
