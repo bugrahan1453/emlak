@@ -51,6 +51,27 @@ if ($secret) {
     }
 }
 
+// ── Rate Limit (LOG-ONLY mod) ─────────────────────────────────────────────
+$clientIpRL = isset($_SERVER['HTTP_X_FORWARDED_FOR'])
+    ? trim(explode(',', $_SERVER['HTTP_X_FORWARDED_FOR'])[0])
+    : ($_SERVER['REMOTE_ADDR'] ?? 'unknown');
+$rlFile = sys_get_temp_dir() . '/emlakradar_rl_' . md5($clientIpRL) . '.json';
+$rlData = file_exists($rlFile) ? json_decode(@file_get_contents($rlFile), true) : null;
+$rlNow  = time();
+$rlMinute = floor($rlNow / 60);
+
+if ($rlData && ($rlData['minute'] ?? 0) === $rlMinute) {
+    $rlData['count']++;
+} else {
+    $rlData = ['minute' => $rlMinute, 'count' => 1];
+}
+@file_put_contents($rlFile, json_encode($rlData));
+
+// Log-only: 120 istek/dakika aşılırsa uyar ama engelleme
+if ($rlData['count'] > 120) {
+    error_log("RATE_LIMIT_WARNING: IP={$clientIpRL}, requests_this_minute={$rlData['count']}");
+}
+
 // ── Payload ayrıştır ──────────────────────────────────────────────────────
 $payload = json_decode($rawBody, true);
 if (!$payload || !isset($payload['tip'])) {
@@ -85,6 +106,8 @@ switch ($tip) {
 
         foreach ($ilanlar as $i) {
             try {
+                $pdo->beginTransaction();
+
                 // Mükerrer kontrol
                 $mevcut_id = null;
                 if (!empty($i['kaynak_url'])) {
@@ -115,11 +138,12 @@ switch ($tip) {
                     }
                     // son_gorunme güncelle — ilan hâlâ aktif
                     $pdo->prepare("UPDATE ilanlar SET son_gorunme = NOW() WHERE id = ?")->execute([$mevcut_id]);
+                    $pdo->commit();
                     $atilan++; continue;
                 }
 
                 $ilanData = mapIlanData($i);
-                if (!$ilanData['baslik']) { $atilan++; continue; }
+                if (!$ilanData['baslik']) { $pdo->commit(); $atilan++; continue; }
                 // Fiyat 0 ise logla ama kaydetmeye devam et (fiyat çekilememiş olabilir)
 
                 try {
@@ -127,6 +151,7 @@ switch ($tip) {
                 } catch (PDOException $dupEx) {
                     // Duplicate key (SQLSTATE 23000) — iki paralel run aynı ilanı eklemeye çalıştı
                     if (str_starts_with($dupEx->getCode(), '23')) {
+                        $pdo->rollBack();
                         $atilan++; continue;
                     }
                     throw $dupEx;
@@ -158,7 +183,10 @@ switch ($tip) {
                     );
                 }
 
+                $pdo->commit();
+
             } catch (Exception $e) {
+                if ($pdo->inTransaction()) $pdo->rollBack();
                 $errors[] = $e->getMessage();
                 error_log('Webhook yeni_ilan hatası: ' . $e->getMessage());
             }
@@ -590,7 +618,8 @@ function fotografIndir(array $urls): array {
             CURLOPT_TIMEOUT        => 20,
             CURLOPT_USERAGENT      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
             CURLOPT_REFERER        => $isSahibinden ? 'https://www.sahibinden.com/' : $referer,
-            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
             CURLOPT_HTTPHEADER     => [
                 'Accept: image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
                 'Accept-Language: tr-TR,tr;q=0.9',
@@ -600,9 +629,33 @@ function fotografIndir(array $urls): array {
             ],
         ]);
         $data     = curl_exec($ch);
+        $curlErr  = curl_errno($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $ctype    = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
         curl_close($ch);
+
+        // SSL hatası varsa SSL doğrulamasız tekrar dene + logla
+        if ($curlErr === CURLE_SSL_CONNECT_ERROR || $curlErr === CURLE_SSL_CERTPROBLEM || $curlErr === CURLE_PEER_FAILED_VERIFICATION || $curlErr === 60 || $curlErr === 51) {
+            error_log("fotografIndir: SSL hatası ($curlErr) — SSL'siz retry: $url");
+            $ch2 = curl_init($url);
+            curl_setopt_array($ch2, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_FOLLOWLOCATION => true,
+                CURLOPT_MAXREDIRS      => 5,
+                CURLOPT_TIMEOUT        => 20,
+                CURLOPT_USERAGENT      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                CURLOPT_REFERER        => $isSahibinden ? 'https://www.sahibinden.com/' : $referer,
+                CURLOPT_SSL_VERIFYPEER => false,
+                CURLOPT_HTTPHEADER     => [
+                    'Accept: image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+                    'Accept-Language: tr-TR,tr;q=0.9',
+                ],
+            ]);
+            $data     = curl_exec($ch2);
+            $httpCode = curl_getinfo($ch2, CURLINFO_HTTP_CODE);
+            $ctype    = curl_getinfo($ch2, CURLINFO_CONTENT_TYPE);
+            curl_close($ch2);
+        }
 
         // Geçerli resim mi kontrol et
         $isImage = $ctype && strpos($ctype, 'image/') === 0;

@@ -299,6 +299,13 @@ CREATE TABLE IF NOT EXISTS vds_heartbeats (
     INDEX idx_last_seen (last_seen)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Performans index'leri (v2.6)
+CREATE INDEX IF NOT EXISTS idx_ilanlar_created ON ilanlar(created_at);
+CREATE INDEX IF NOT EXISTS idx_ilanlar_updated ON ilanlar(updated_at);
+CREATE INDEX IF NOT EXISTS idx_ilanlar_fiyat_deg ON ilanlar(fiyat_degisim_sayisi);
+CREATE INDEX IF NOT EXISTS idx_ilanlar_m2_fiyat ON ilanlar(m2_fiyat);
+CREATE INDEX IF NOT EXISTS idx_ilanlar_son_gorunme ON ilanlar(son_gorunme);
+
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- ============================================================

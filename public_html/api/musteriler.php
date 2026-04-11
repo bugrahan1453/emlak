@@ -32,6 +32,12 @@ switch ($action) {
     case 'update':
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') jsonResponse(false, null, 'POST gerekli.', 405);
         $id   = (int)($_GET['id'] ?? 0);
+        // ofis_id yetki kontrolü
+        $musteri = $model->findById($id);
+        if (!$musteri) jsonResponse(false, null, 'Müşteri bulunamadı.', 404);
+        if ($musteri['ofis_id'] != $user['ofis_id']) {
+            jsonResponse(false, null, 'Bu müşteriye erişim yetkiniz yok.', 403);
+        }
         $data = json_decode(file_get_contents('php://input'), true) ?? [];
         $model->update($id, $data);
         jsonResponse(true, null, 'Müşteri güncellendi.');
@@ -39,6 +45,12 @@ switch ($action) {
 
     case 'son_iletisim_guncelle':
         $id = (int)($_GET['id'] ?? 0);
+        // ofis_id yetki kontrolü
+        $musteri = $model->findById($id);
+        if (!$musteri) jsonResponse(false, null, 'Müşteri bulunamadı.', 404);
+        if ($musteri['ofis_id'] != $user['ofis_id']) {
+            jsonResponse(false, null, 'Bu müşteriye erişim yetkiniz yok.', 403);
+        }
         $model->update($id, ['son_iletisim' => date('Y-m-d H:i:s')]);
         jsonResponse(true, null, 'Son iletişim güncellendi.');
         break;

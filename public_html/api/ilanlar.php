@@ -51,6 +51,12 @@ switch ($action) {
     case 'update':
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') jsonResponse(false, null, 'POST gerekli.', 405);
         $id   = (int)($_GET['id'] ?? 0);
+        // ofis_id yetki kontrolü
+        $ilan = $model->findById($id);
+        if (!$ilan) jsonResponse(false, null, 'İlan bulunamadı.', 404);
+        if ($ilan['ofis_id'] && $ilan['ofis_id'] != $user['ofis_id']) {
+            jsonResponse(false, null, 'Bu ilana erişim yetkiniz yok.', 403);
+        }
         $data = json_decode(file_get_contents('php://input'), true) ?? [];
         $model->update($id, $data);
         jsonResponse(true, null, 'İlan güncellendi.');
@@ -59,6 +65,12 @@ switch ($action) {
     case 'delete':
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') jsonResponse(false, null, 'POST gerekli.', 405);
         $id = (int)($_GET['id'] ?? 0);
+        // ofis_id yetki kontrolü
+        $ilan = $model->findById($id);
+        if (!$ilan) jsonResponse(false, null, 'İlan bulunamadı.', 404);
+        if ($ilan['ofis_id'] && $ilan['ofis_id'] != $user['ofis_id']) {
+            jsonResponse(false, null, 'Bu ilana erişim yetkiniz yok.', 403);
+        }
         $model->delete($id);
         jsonResponse(true, null, 'İlan silindi.');
         break;
