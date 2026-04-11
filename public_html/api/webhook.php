@@ -429,29 +429,38 @@ switch ($tip) {
         jsonResponse(true, ['kaldirilmis' => $kaldirilmis, 'kontrol_edilen' => count($sunucudakiler)]);
         break;
 
-    // ── SIFIR FİYAT TEMİZLEME ─────────────────────────────────────────
+    // ── İLAN TEMİZLEME (sıfır fiyat veya tüm site) ───────────────────
     case 'temizle_sifir_fiyat':
         $site = $payload['site'] ?? null;
-        $islem = $payload['islem'] ?? 'sil'; // 'sil' veya 'listele'
+        $islem = $payload['islem'] ?? 'sil'; // 'sil', 'listele', 'sil_hepsi'
 
-        $where = "fiyat IS NULL OR fiyat = 0 OR fiyat = ''";
-        $params = [];
-        if ($site) {
-            $where .= " AND kaynak_site = ?";
-            $params[] = $site;
-        }
-
-        if ($islem === 'listele') {
-            $stmt = $pdo->prepare("SELECT id, kaynak_id, kaynak_site, baslik, fiyat FROM ilanlar WHERE {$where} LIMIT 500");
-            $stmt->execute($params);
-            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            jsonResponse(true, ['adet' => count($rows), 'ilanlar' => $rows]);
-        } else {
-            $stmt = $pdo->prepare("DELETE FROM ilanlar WHERE {$where}");
-            $stmt->execute($params);
+        if ($islem === 'sil_hepsi' && $site) {
+            // Belirtilen sitenin TÜM ilanlarını sil (yanlış fiyat düzeltme için)
+            $stmt = $pdo->prepare("DELETE FROM ilanlar WHERE kaynak_site = ?");
+            $stmt->execute([$site]);
             $silinen = $stmt->rowCount();
-            logSystem('webhook', "temizle_sifir_fiyat: site=" . ($site ?? 'tumu') . ", silinen={$silinen}", null, 1);
-            jsonResponse(true, ['silinen' => $silinen, 'site' => $site ?? 'tumu']);
+            logSystem('webhook', "temizle_hepsi: site={$site}, silinen={$silinen}", null, 1);
+            jsonResponse(true, ['silinen' => $silinen, 'site' => $site, 'islem' => 'sil_hepsi']);
+        } else {
+            $where = "fiyat IS NULL OR fiyat = 0 OR fiyat = ''";
+            $params = [];
+            if ($site) {
+                $where .= " AND kaynak_site = ?";
+                $params[] = $site;
+            }
+
+            if ($islem === 'listele') {
+                $stmt = $pdo->prepare("SELECT id, kaynak_id, kaynak_site, baslik, fiyat FROM ilanlar WHERE {$where} LIMIT 500");
+                $stmt->execute($params);
+                $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                jsonResponse(true, ['adet' => count($rows), 'ilanlar' => $rows]);
+            } else {
+                $stmt = $pdo->prepare("DELETE FROM ilanlar WHERE {$where}");
+                $stmt->execute($params);
+                $silinen = $stmt->rowCount();
+                logSystem('webhook', "temizle_sifir_fiyat: site=" . ($site ?? 'tumu') . ", silinen={$silinen}", null, 1);
+                jsonResponse(true, ['silinen' => $silinen, 'site' => $site ?? 'tumu']);
+            }
         }
         break;
 
