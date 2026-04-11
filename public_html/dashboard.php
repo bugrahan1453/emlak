@@ -175,6 +175,79 @@ require_once APP_DIR . '/views/layout/header.php';
         </div>
     </div>
 
+    <!-- VDS Durumu -->
+    <?php
+    $vdsHeartbeats = [];
+    try {
+        $stmtVds = $pdo->prepare("SELECT instance_id, durum, job_count, detail_count, yeni_ilan, hata_mesaji, tur_suresi_sn, last_seen, TIMESTAMPDIFF(MINUTE, last_seen, NOW()) AS sessiz_dk FROM vds_heartbeats ORDER BY instance_id");
+        $stmtVds->execute();
+        $vdsHeartbeats = $stmtVds->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Exception $e) {}
+    ?>
+    <?php if (!empty($vdsHeartbeats)): ?>
+    <div class="rounded-2xl overflow-hidden" style="background: rgba(15,23,62,0.6); border: 1px solid rgba(255,255,255,0.06);">
+        <div class="flex items-center justify-between px-4 py-3 border-b" style="border-color: rgba(255,255,255,0.06);">
+            <div class="flex items-center gap-2">
+                <span class="text-sm font-semibold" style="color: #e8ecf4;">🖥️ VDS Durumu</span>
+                <?php
+                $aktifVds = count(array_filter($vdsHeartbeats, fn($v) => $v['sessiz_dk'] <= 60));
+                $toplamVds = count($vdsHeartbeats);
+                $hepsiOk = $aktifVds === $toplamVds;
+                ?>
+                <span class="text-xs px-2 py-0.5 rounded-full font-mono"
+                      style="background: <?= $hepsiOk ? 'rgba(0,255,136,0.1)' : 'rgba(255,51,102,0.1)' ?>; color: <?= $hepsiOk ? '#00ff88' : '#ff3366' ?>;">
+                    <?= $aktifVds ?>/<?= $toplamVds ?> aktif
+                </span>
+            </div>
+            <span class="text-xs" style="color: #7a8599;">Son güncelleme: <?= date('H:i') ?></span>
+        </div>
+        <div class="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 p-4">
+            <?php foreach ($vdsHeartbeats as $vds):
+                $sessiz = (int)$vds['sessiz_dk'];
+                if ($sessiz <= 30) { $renk = '#00ff88'; $bgRenk = 'rgba(0,255,136,0.08)'; $borderRenk = 'rgba(0,255,136,0.2)'; $durumText = 'Aktif'; }
+                elseif ($sessiz <= 60) { $renk = '#ffaa00'; $bgRenk = 'rgba(255,170,0,0.08)'; $borderRenk = 'rgba(255,170,0,0.2)'; $durumText = 'Yavaş'; }
+                else { $renk = '#ff3366'; $bgRenk = 'rgba(255,51,102,0.08)'; $borderRenk = 'rgba(255,51,102,0.2)'; $durumText = 'Çökmüş'; }
+
+                $durumIcon = $vds['durum'] === 'basladi' ? '🔄' : ($vds['durum'] === 'tamamlandi' ? '✅' : '❌');
+            ?>
+            <div class="rounded-xl p-3" style="background: <?= $bgRenk ?>; border: 1px solid <?= $borderRenk ?>;">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-xs font-bold font-mono" style="color: <?= $renk ?>;"><?= e($vds['instance_id']) ?></span>
+                    <span class="text-xs"><?= $durumIcon ?></span>
+                </div>
+                <div class="space-y-1">
+                    <div class="flex justify-between text-xs" style="color: #7a8599;">
+                        <span>Durum</span>
+                        <span style="color: <?= $renk ?>;"><?= $durumText ?></span>
+                    </div>
+                    <div class="flex justify-between text-xs" style="color: #7a8599;">
+                        <span>Son sinyal</span>
+                        <span style="color: #e8ecf4;"><?= $sessiz < 1 ? 'şimdi' : $sessiz . 'dk önce' ?></span>
+                    </div>
+                    <?php if ($vds['yeni_ilan'] > 0): ?>
+                    <div class="flex justify-between text-xs" style="color: #7a8599;">
+                        <span>Yeni ilan</span>
+                        <span style="color: #00d4ff;"><?= $vds['yeni_ilan'] ?></span>
+                    </div>
+                    <?php endif; ?>
+                    <?php if ($vds['tur_suresi_sn'] > 0): ?>
+                    <div class="flex justify-between text-xs" style="color: #7a8599;">
+                        <span>Tur süresi</span>
+                        <span style="color: #e8ecf4;"><?= round($vds['tur_suresi_sn'] / 60, 1) ?>dk</span>
+                    </div>
+                    <?php endif; ?>
+                    <?php if ($vds['hata_mesaji']): ?>
+                    <div class="text-xs truncate mt-1" style="color: #ff3366;" title="<?= e($vds['hata_mesaji']) ?>">
+                        ⚠️ <?= e(truncate($vds['hata_mesaji'], 30)) ?>
+                    </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+            <?php endforeach; ?>
+        </div>
+    </div>
+    <?php endif; ?>
+
     <!-- Alt Grid: Görevler + Danışmanlar + Eşleştirmeler -->
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
 

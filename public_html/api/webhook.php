@@ -62,6 +62,7 @@ if (!$payload || !isset($payload['tip'])) {
 $tip    = $payload['tip'];    // yeni_ilan | guncelleme | silindi | fiyat_degisiklik | sahte_ilan
 $kaynak = $payload['kaynak'] ?? 'unknown';
 $zaman  = $payload['zaman']  ?? date('c');
+$instanceId = $_SERVER['HTTP_X_INSTANCE_ID'] ?? $payload['instance_id'] ?? 'default';
 
 // ── Modeller ──────────────────────────────────────────────────────────────
 $ilanModel    = new Ilan();
@@ -163,7 +164,7 @@ switch ($tip) {
             }
         }
 
-        logSystem('webhook', "yeni_ilan: eklenen={$eklenen}, atilan={$atilan}", null, 1);
+        logSystem('webhook', "yeni_ilan: eklenen={$eklenen}, atilan={$atilan}, instance={$instanceId}", null, 1);
         jsonResponse(true, ['eklenen' => $eklenen, 'atilan' => $atilan, 'hatalar' => $errors]);
         break;
 
@@ -192,7 +193,7 @@ switch ($tip) {
         unset($updateData['ofis_id']); // ofis_id değiştirme
         $ilanModel->update($existing['id'], $updateData);
 
-        logSystem('webhook', "guncelleme: id={$existing['id']}", null, 1);
+        logSystem('webhook', "guncelleme: id={$existing['id']}, instance={$instanceId}", null, 1);
         jsonResponse(true, ['durum' => 'guncellendi', 'id' => $existing['id']]);
         break;
 
@@ -221,7 +222,7 @@ switch ($tip) {
                 APP_URL . '/ilan-detay.php?id=' . $existing['id']
             );
 
-            logSystem('webhook', "silindi: id={$existing['id']}", null, $existing['ofis_id']);
+            logSystem('webhook', "silindi: id={$existing['id']}, instance={$instanceId}", null, $existing['ofis_id']);
         }
 
         jsonResponse(true, ['durum' => 'islendi']);
@@ -260,7 +261,7 @@ switch ($tip) {
                 APP_URL . '/ilan-detay.php?id=' . $existing['id']
             );
 
-            logSystem('webhook', "fiyat_degisiklik: id={$existing['id']}, {$eskiFiyat}→{$yeniFiyat}", null, $existing['ofis_id']);
+            logSystem('webhook', "fiyat_degisiklik: id={$existing['id']}, {$eskiFiyat}→{$yeniFiyat}, instance={$instanceId}", null, $existing['ofis_id']);
         }
 
         jsonResponse(true, ['durum' => 'islendi']);
@@ -292,7 +293,7 @@ switch ($tip) {
                 APP_URL . '/ilan-detay.php?id=' . $existing['id']
             );
 
-            logSystem('webhook', "sahte_ilan: id={$existing['id']}, skor={$sahteSkor}", null, $existing['ofis_id']);
+            logSystem('webhook', "sahte_ilan: id={$existing['id']}, skor={$sahteSkor}, instance={$instanceId}", null, $existing['ofis_id']);
         }
 
         jsonResponse(true, ['durum' => 'islendi']);
@@ -392,23 +393,44 @@ switch ($tip) {
             }
         }
 
-        logSystem('webhook', "goruldu: site={$site}, guncellenen={$guncellenen}, fiyat_degisen={$fiyatDegisen}", null, 1);
+        logSystem('webhook', "goruldu: site={$site}, guncellenen={$guncellenen}, fiyat_degisen={$fiyatDegisen}, instance={$instanceId}", null, 1);
         jsonResponse(true, ['guncellenen' => $guncellenen, 'fiyat_degisen' => $fiyatDegisen]);
         break;
 
     // ── KALDIRILMIŞ KONTROL: sitede artık olmayan ilanları işaretle ───────
     case 'kaldirilmis_kontrol':
-        $site     = $payload['site'] ?? '';
-        $aktifIds = $payload['aktif_ids'] ?? [];
+        $site        = $payload['site'] ?? '';
+        $aktifIds    = $payload['aktif_ids'] ?? [];
+        $sehirler    = $payload['sehirler'] ?? [];
+        $kategoriler = $payload['kategoriler'] ?? [];
+        $instanceId  = $_SERVER['HTTP_X_INSTANCE_ID'] ?? $payload['instance_id'] ?? 'unknown';
+
         if (!$site || count($aktifIds) < 10) {
+            logSystem('webhook', "kaldirilmis_kontrol: yetersiz veri (site={$site}, ids=" . count($aktifIds) . ", instance={$instanceId})", null, 1);
             jsonResponse(true, ['kaldirilmis' => 0, 'neden' => 'yetersiz_veri']);
         }
 
-        // Bu sitedeki aktif ilanların ID'lerini al
-        $stmt = $pdo->prepare(
-            "SELECT id, kaynak_id, baslik, ofis_id FROM ilanlar WHERE kaynak_site = ? AND durum = 'aktif'"
-        );
-        $stmt->execute([$site]);
+        // Filtreli sorgu oluştur
+        $where = "kaynak_site = ? AND durum = 'aktif'";
+        $params = [$site];
+
+        if (!empty($sehirler)) {
+            // Case-insensitive karşılaştırma — format farkını tolere eder
+            $sehirConditions = [];
+            foreach ($sehirler as $s) {
+                $sehirConditions[] = 'LOWER(sehir) = LOWER(?)';
+                $params[] = $s;
+            }
+            $where .= ' AND (' . implode(' OR ', $sehirConditions) . ')';
+        }
+        if (!empty($kategoriler)) {
+            $ph = implode(',', array_fill(0, count($kategoriler), '?'));
+            $where .= " AND emlak_tipi IN ($ph)";
+            $params = array_merge($params, $kategoriler);
+        }
+
+        $stmt = $pdo->prepare("SELECT id, kaynak_id, baslik, ofis_id FROM ilanlar WHERE $where");
+        $stmt->execute($params);
         $sunucudakiler = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         $aktifSet = array_flip($aktifIds); // hızlı lookup için
@@ -425,7 +447,7 @@ switch ($tip) {
             }
         }
 
-        logSystem('webhook', "kaldirilmis_kontrol: site={$site}, aktif_ids=" . count($aktifIds) . ", kaldirilmis={$kaldirilmis}", null, 1);
+        logSystem('webhook', "kaldirilmis_kontrol: site={$site}, instance={$instanceId}, aktif_ids=" . count($aktifIds) . ", kontrol_edilen=" . count($sunucudakiler) . ", kaldirilmis={$kaldirilmis}" . (!empty($kategoriler) ? ", kategoriler=" . implode(',', $kategoriler) : '') . (!empty($sehirler) ? ", sehirler=" . implode(',', $sehirler) : ''), null, 1);
         jsonResponse(true, ['kaldirilmis' => $kaldirilmis, 'kontrol_edilen' => count($sunucudakiler)]);
         break;
 
@@ -435,7 +457,6 @@ switch ($tip) {
         $islem = $payload['islem'] ?? 'sil'; // 'sil', 'listele', 'sil_hepsi'
 
         if ($islem === 'sil_hepsi' && $site) {
-            // Belirtilen sitenin TÜM ilanlarını sil (yanlış fiyat düzeltme için)
             $stmt = $pdo->prepare("DELETE FROM ilanlar WHERE kaynak_site = ?");
             $stmt->execute([$site]);
             $silinen = $stmt->rowCount();
@@ -464,6 +485,65 @@ switch ($tip) {
         }
         break;
 
+    // ── VDS HEARTBEAT: durum takibi ──────────────────────────────────────
+    case 'heartbeat':
+        $hbInstanceId  = $payload['instance_id'] ?? $instanceId;
+        $hbDurum       = $payload['durum'] ?? 'basladi';
+        $hbJobCount    = (int)($payload['job_count'] ?? 0);
+        $hbDetailCount = (int)($payload['detail_count'] ?? 0);
+        $hbYeniIlan    = (int)($payload['yeni_ilan'] ?? 0);
+        $hbHata        = $payload['hata_mesaji'] ?? null;
+        $hbSureSn      = (int)($payload['tur_suresi_sn'] ?? 0);
+
+        if (!$hbInstanceId) {
+            jsonResponse(false, null, 'instance_id gerekli.', 400);
+        }
+
+        $stmt = $pdo->prepare("
+            INSERT INTO vds_heartbeats (instance_id, durum, job_count, detail_count, yeni_ilan, hata_mesaji, tur_suresi_sn, last_seen)
+            VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
+            ON DUPLICATE KEY UPDATE
+                durum = VALUES(durum),
+                job_count = VALUES(job_count),
+                detail_count = VALUES(detail_count),
+                yeni_ilan = VALUES(yeni_ilan),
+                hata_mesaji = VALUES(hata_mesaji),
+                tur_suresi_sn = VALUES(tur_suresi_sn),
+                last_seen = NOW()
+        ");
+        $stmt->execute([$hbInstanceId, $hbDurum, $hbJobCount, $hbDetailCount, $hbYeniIlan, $hbHata, $hbSureSn]);
+
+        // Sessiz VDS tespiti — diğer instance'ları kontrol et
+        $stmtCheck = $pdo->prepare("
+            SELECT instance_id, durum, last_seen,
+                   TIMESTAMPDIFF(MINUTE, last_seen, NOW()) AS sessiz_dk
+            FROM vds_heartbeats
+            WHERE TIMESTAMPDIFF(MINUTE, last_seen, NOW()) > 60
+        ");
+        $stmtCheck->execute();
+        $sessizVdsler = $stmtCheck->fetchAll(PDO::FETCH_ASSOC);
+
+        // Sessiz VDS varsa bildirim oluştur
+        foreach ($sessizVdsler as $sv) {
+            $stmtBildirim = $pdo->prepare("
+                SELECT COUNT(*) FROM bildirimler
+                WHERE baslik LIKE ? AND created_at > NOW() - INTERVAL 1 HOUR
+            ");
+            $stmtBildirim->execute(['%' . $sv['instance_id'] . '%']);
+            if ((int)$stmtBildirim->fetchColumn() === 0) {
+                $bildirimModel->createForOfis(
+                    1,
+                    'kirmizi_alarm',
+                    "VDS Çöktü: {$sv['instance_id']}",
+                    "{$sv['sessiz_dk']} dakikadır sinyal yok. Son durum: {$sv['durum']}",
+                    APP_URL . '/dashboard.php'
+                );
+            }
+        }
+
+        logSystem('webhook', "heartbeat: instance={$hbInstanceId}, durum={$hbDurum}, jobs={$hbJobCount}, detay={$hbDetailCount}, yeni={$hbYeniIlan}" . ($hbSureSn > 0 ? ", sure={$hbSureSn}sn" : ''), null, 1);
+        jsonResponse(true, ['durum' => 'ok', 'sessiz_vds' => count($sessizVdsler)]);
+        break;
 
 }
 
@@ -543,10 +623,62 @@ function fotografIndir(array $urls): array {
     return $lokal;
 }
 
+// ── Yardımcı: Şehir adı normalizasyonu ────────────────────────────────────
+function normalizeSehir(string $sehir): string {
+    $sehir = trim($sehir);
+    if (!$sehir) return '';
+
+    $map = [
+        'canakkale' => 'Çanakkale', 'istanbul' => 'İstanbul', 'izmir' => 'İzmir',
+        'ankara' => 'Ankara', 'antalya' => 'Antalya', 'bursa' => 'Bursa',
+        'balikesir' => 'Balıkesir', 'tekirdag' => 'Tekirdağ', 'edirne' => 'Edirne',
+        'mugla' => 'Muğla', 'aydin' => 'Aydın', 'manisa' => 'Manisa',
+        'kirklareli' => 'Kırklareli', 'kocaeli' => 'Kocaeli', 'sakarya' => 'Sakarya',
+        'denizli' => 'Denizli', 'eskisehir' => 'Eskişehir', 'trabzon' => 'Trabzon',
+        'samsun' => 'Samsun', 'gaziantep' => 'Gaziantep', 'konya' => 'Konya',
+        'mersin' => 'Mersin', 'adana' => 'Adana', 'hatay' => 'Hatay',
+        'diyarbakir' => 'Diyarbakır', 'kahramanmaras' => 'Kahramanmaraş',
+        'sanliurfa' => 'Şanlıurfa', 'van' => 'Van', 'malatya' => 'Malatya',
+        'elazig' => 'Elazığ', 'erzurum' => 'Erzurum', 'sivas' => 'Sivas',
+        'kayseri' => 'Kayseri', 'afyon' => 'Afyonkarahisar', 'afyonkarahisar' => 'Afyonkarahisar',
+        'usak' => 'Uşak', 'kutahya' => 'Kütahya', 'bolu' => 'Bolu',
+        'duzce' => 'Düzce', 'zonguldak' => 'Zonguldak', 'bartin' => 'Bartın',
+        'karabuk' => 'Karabük', 'kastamonu' => 'Kastamonu', 'corum' => 'Çorum',
+        'amasya' => 'Amasya', 'tokat' => 'Tokat', 'ordu' => 'Ordu',
+        'giresun' => 'Giresun', 'rize' => 'Rize', 'artvin' => 'Artvin',
+        'gumushane' => 'Gümüşhane', 'bayburt' => 'Bayburt', 'erzincan' => 'Erzincan',
+        'tunceli' => 'Tunceli', 'bingol' => 'Bingöl', 'mus' => 'Muş',
+        'bitlis' => 'Bitlis', 'siirt' => 'Siirt', 'batman' => 'Batman',
+        'sirnak' => 'Şırnak', 'hakkari' => 'Hakkâri', 'mardin' => 'Mardin',
+        'adiyaman' => 'Adıyaman', 'osmaniye' => 'Osmaniye', 'kilis' => 'Kilis',
+        'nigde' => 'Niğde', 'nevsehir' => 'Nevşehir', 'aksaray' => 'Aksaray',
+        'kirikkale' => 'Kırıkkale', 'kirsehir' => 'Kırşehir', 'yozgat' => 'Yozgat',
+        'cankiri' => 'Çankırı', 'sinop' => 'Sinop', 'bilecik' => 'Bilecik',
+        'burdur' => 'Burdur', 'isparta' => 'Isparta', 'karaman' => 'Karaman',
+        'yalova' => 'Yalova', 'cankirı' => 'Çankırı', 'igdir' => 'Iğdır',
+        'agri' => 'Ağrı', 'kars' => 'Kars', 'ardahan' => 'Ardahan',
+        'tekedag' => 'Tekirdağ',
+    ];
+
+    $lower = mb_strtolower($sehir, 'UTF-8');
+    // ASCII normalize et (ç→c, ş→s, ğ→g, ı→i, ö→o, ü→u)
+    $ascii = strtr($lower, [
+        'ç'=>'c','ğ'=>'g','ı'=>'i','ö'=>'o','ş'=>'s','ü'=>'u',
+        'â'=>'a','î'=>'i','û'=>'u',
+    ]);
+
+    if (isset($map[$ascii])) return $map[$ascii];
+    if (isset($map[$lower])) return $map[$lower];
+
+    // Haritada yoksa başlıklı hale getir
+    return mb_convert_case($sehir, MB_CASE_TITLE, 'UTF-8');
+}
+
 // ── Yardımcı: Scraper verisini DB formatına çevir ─────────────────────────
 function mapIlanData(array $i): array {
     // Flat (scraper) veya nested (eski format) her ikisini de destekle
     $sehir   = $i['konum']['il']      ?? $i['sehir']    ?? '';
+    $sehir   = normalizeSehir($sehir);
     $ilce    = $i['konum']['ilce']    ?? $i['ilce']     ?? null;
     $mahalle = $i['konum']['mahalle'] ?? $i['mahalle']  ?? null;
     $adres   = $i['konum']['adres']   ?? $i['adres']    ?? null;

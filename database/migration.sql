@@ -283,6 +283,22 @@ CREATE TABLE IF NOT EXISTS sistem_loglari (
     INDEX idx_kullanici (kullanici_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- VDS Heartbeat Takibi
+CREATE TABLE IF NOT EXISTS vds_heartbeats (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    instance_id VARCHAR(50) NOT NULL,
+    durum ENUM('basladi','tamamlandi','hata') NOT NULL DEFAULT 'basladi',
+    job_count INT DEFAULT 0,
+    detail_count INT DEFAULT 0,
+    yeni_ilan INT DEFAULT 0,
+    hata_mesaji VARCHAR(500),
+    tur_suresi_sn INT DEFAULT 0,
+    last_seen DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_instance (instance_id),
+    INDEX idx_last_seen (last_seen)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- ============================================================
