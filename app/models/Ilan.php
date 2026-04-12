@@ -113,11 +113,11 @@ class Ilan {
             INSERT INTO ilanlar (ofis_id, danisman_id, baslik, aciklama, fiyat, sehir, ilce, mahalle, adres,
                 lat, lng, metrekare, oda_sayisi, kat, bina_yasi, isitma_tipi, esya_durumu, fotograflar,
                 kaynak_site, kaynak_url, kaynak_id, ilan_sahibi_tel, ilan_sahibi_ad, sahibinden_mi,
-                ilan_tipi, emlak_tipi, durum, notlar, son_gorunme, m2_fiyat)
+                ilan_tipi, emlak_tipi, durum, notlar, son_gorunme, m2_fiyat, ilk_fiyat)
             VALUES (:ofis_id, :danisman_id, :baslik, :aciklama, :fiyat, :sehir, :ilce, :mahalle, :adres,
                 :lat, :lng, :metrekare, :oda_sayisi, :kat, :bina_yasi, :isitma_tipi, :esya_durumu, :fotograflar,
                 :kaynak_site, :kaynak_url, :kaynak_id, :ilan_sahibi_tel, :ilan_sahibi_ad, :sahibinden_mi,
-                :ilan_tipi, :emlak_tipi, :durum, :notlar, :son_gorunme, :m2_fiyat)
+                :ilan_tipi, :emlak_tipi, :durum, :notlar, :son_gorunme, :m2_fiyat, :ilk_fiyat)
         ");
         $stmt->execute([
             ':ofis_id'        => $data['ofis_id'] ?? null,
@@ -150,6 +150,7 @@ class Ilan {
             ':notlar'         => $data['notlar'] ?? null,
             ':son_gorunme'    => $data['son_gorunme'] ?? date('Y-m-d H:i:s'),
             ':m2_fiyat'       => $data['m2_fiyat'] ?? null,
+            ':ilk_fiyat'      => $data['fiyat'] ?? null,
         ]);
         return (int)$this->db->lastInsertId();
     }

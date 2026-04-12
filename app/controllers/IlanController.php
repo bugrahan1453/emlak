@@ -29,6 +29,7 @@ class IlanController {
             'fiyat_max'  => getVal('fiyat_max'),
             'q'          => getVal('q'),
             'fiyat_dusen'   => getVal('fiyat_dusen'),
+            'fiyat_artan'   => getVal('fiyat_artan'),
             'uzun_suredir'  => getVal('uzun_suredir'),
             'son_gorulmeyen'=> getVal('son_gorulmeyen'),
         ];
